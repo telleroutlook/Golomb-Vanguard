@@ -1,6 +1,7 @@
 mod known;
 mod naive;
 mod bitmap;
+mod avail;
 mod engine_v2;
 mod engine_v3;
 mod engine_v4;

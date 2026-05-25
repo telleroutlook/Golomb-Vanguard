@@ -158,19 +158,41 @@ impl<const W: usize> Bitmap<W> {
     }
 
     /// Find the sum of the `k` smallest cleared bit positions in the bitmap.
-    /// Used for the dynamic lower bound (Phase 5 Lock ②).
-    /// Returns None if fewer than k cleared bits exist.
+    /// Uses word-level trailing_zeros on complement for fast scanning.
+    /// Returns None if fewer than k cleared bits exist in [1, max_bit].
+    #[inline]
     pub fn sum_smallest_unset(&self, k: usize, max_bit: usize) -> Option<u32> {
+        if k == 0 {
+            return Some(0);
+        }
         let mut sum: u32 = 0;
         let mut count = 0;
-        // Iterate through bits and find unset ones
-        for bit in 1..=max_bit {
-            if !self.get_bit(bit) {
-                sum += bit as u32;
+        for word_idx in 0..W {
+            let base = word_idx * 64;
+            if base > max_bit {
+                break;
+            }
+            // Complement: unset bits become 1
+            let mut unset = !self.words[word_idx];
+            // Skip distance 0 (bit 0 of word 0)
+            if word_idx == 0 {
+                unset &= !1u64;
+            }
+            // Mask out bits beyond max_bit
+            let word_end = ((word_idx + 1) * 64).min(max_bit + 1);
+            let bits_in_word = word_end - base;
+            if bits_in_word < 64 {
+                unset &= (1u64 << bits_in_word) - 1;
+            }
+            // Fast iteration using trailing_zeros
+            while unset != 0 {
+                let bit = unset.trailing_zeros() as usize;
+                sum += (base + bit) as u32;
                 count += 1;
                 if count == k {
                     return Some(sum);
                 }
+                unset &= unset - 1; // clear lowest set bit
             }
         }
         if count >= k {
@@ -178,6 +200,38 @@ impl<const W: usize> Bitmap<W> {
         } else {
             None
         }
+    }
+
+    /// Collect the `k` smallest cleared bit positions into a sorted array.
+    /// Returns the number of positions actually collected (may be < k).
+    #[inline]
+    pub fn collect_smallest_unset(&self, k: usize, max_bit: usize, out: &mut [u32]) -> usize {
+        let mut count = 0;
+        for word_idx in 0..W {
+            let base = word_idx * 64;
+            if base > max_bit || count >= k {
+                break;
+            }
+            let mut unset = !self.words[word_idx];
+            if word_idx == 0 {
+                unset &= !1u64;
+            }
+            let word_end = ((word_idx + 1) * 64).min(max_bit + 1);
+            let bits_in_word = word_end - base;
+            if bits_in_word < 64 {
+                unset &= (1u64 << bits_in_word) - 1;
+            }
+            while unset != 0 {
+                let bit = unset.trailing_zeros() as usize;
+                out[count] = (base + bit) as u32;
+                count += 1;
+                if count >= k {
+                    return count;
+                }
+                unset &= unset - 1;
+            }
+        }
+        count
     }
 
     #[inline(always)]

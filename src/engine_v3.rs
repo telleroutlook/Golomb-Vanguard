@@ -3,8 +3,10 @@
 ///   - Symmetry breaking: g_first < g_last (halves search space)
 ///   - Static lower bound: P + OGR_MIN[rem+1] >= best → prune
 ///   - Dynamic lower bound (Phase 5 Lock ②): sum of smallest unused distances
+///   - Incremental available-distance cache (Lock ② advanced)
 /// Both bounds are combined via max().
 
+use crate::avail::AvailDistances;
 use crate::bitmap::Bitmap;
 use crate::known::OGR_OPTIMAL;
 
@@ -87,7 +89,6 @@ fn dfs_search<const W: usize>(
     best_marks: &mut Option<Vec<u32>>,
 ) {
     if state.depth == n {
-        // Found a complete ruler
         if state.pos < *best {
             *best = state.pos;
             let mut marks = vec![0u32; n];
@@ -107,7 +108,6 @@ fn dfs_search<const W: usize>(
     }
 
     // Branch & bound: static lower bound
-    // rem marks remaining → sub-ruler of rem+1 marks needs at least OGR_OPTIMAL[rem+1] length
     if rem + 1 < OGR_OPTIMAL.len() {
         let static_bound = state.pos + OGR_OPTIMAL[rem + 1];
         if static_bound >= *best {
@@ -120,26 +120,30 @@ fn dfs_search<const W: usize>(
         return;
     }
 
+    // Precompute available distances for dynamic bound (incremental Lock ②)
+    let base_avail = if rem >= 2 {
+        Some(AvailDistances::from_bitmap(&state.dist, rem - 1, *best as usize))
+    } else {
+        None
+    };
+
     let mut newbits = Bitmap::<W>::ZERO;
 
     for gap in 1..=gap_ceiling {
-        // Symmetry breaking: on the LAST mark, require final gap > first gap
         if state.depth == n - 1 && gap as u32 <= state.first_gap {
             continue;
         }
 
-        // Branch & bound: dynamic lower bound (Phase 5 Lock ②)
-        // After placing this mark, rem-1 gaps remain; their minimum total = sum of rem-1 smallest unused distances.
-        if rem >= 2 {
+        state.ruler.shl_into(gap as usize, &mut newbits);
+        if newbits.intersects(&state.dist) {
+            continue;
+        }
+
+        // Incremental dynamic lower bound
+        if let Some(ref base) = base_avail {
             let new_pos = state.pos + gap as u32;
-            // Compute which distances would be used after this placement
-            state.ruler.shl_into(gap as usize, &mut newbits);
-            if newbits.intersects(&state.dist) {
-                continue;
-            }
-            let mut test_dist = state.dist;
-            test_dist |= newbits;
-            if let Some(dynamic_sum) = test_dist.sum_smallest_unset(rem - 1, *best as usize) {
+            let filtered = AvailDistances::without_bitmap::<W>(base, &newbits);
+            if let Some(dynamic_sum) = filtered.sum_k(rem - 1) {
                 let dynamic_bound = new_pos + dynamic_sum;
                 if rem + 1 < OGR_OPTIMAL.len() {
                     let static_bound = new_pos + OGR_OPTIMAL[rem];
@@ -150,14 +154,8 @@ fn dfs_search<const W: usize>(
                     continue;
                 }
             }
-        } else {
-            state.ruler.shl_into(gap as usize, &mut newbits);
-            if newbits.intersects(&state.dist) {
-                continue;
-            }
         }
 
-        // Place mark
         let mut new_state = state;
         new_state.dist |= newbits;
         new_state.ruler = newbits;

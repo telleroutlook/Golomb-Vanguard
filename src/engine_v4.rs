@@ -9,6 +9,7 @@
 ///   - Cache-line aligned shared state (Phase 5 Lock ③)
 ///   - Branchless cross-word shift in bitmap (Lock ①)
 
+use crate::avail::AvailDistances;
 use crate::bitmap::Bitmap;
 use crate::known::OGR_OPTIMAL;
 use rayon::prelude::*;
@@ -329,7 +330,13 @@ fn dfs_parallel_recursive<const W: usize>(
 ) {
     let rem = n - state.depth;
 
-    // Collect valid gaps at this level for parallel processing
+    // Precompute available distances for incremental bound
+    let base_avail = if rem >= 2 {
+        Some(AvailDistances::from_bitmap(&state.dist, rem - 1, local_best as usize))
+    } else {
+        None
+    };
+
     let mut valid_gaps: Vec<u32> = Vec::with_capacity(gap_ceiling as usize);
     let mut newbits_buf = Vec::with_capacity(gap_ceiling as usize);
 
@@ -345,12 +352,11 @@ fn dfs_parallel_recursive<const W: usize>(
             continue;
         }
 
-        // Dynamic lower bound check
-        if rem >= 2 {
+        // Incremental dynamic lower bound
+        if let Some(ref base) = base_avail {
             let new_pos = state.pos + gap;
-            let mut test_dist = state.dist;
-            test_dist |= newbits;
-            if let Some(dynamic_sum) = test_dist.sum_smallest_unset(rem - 1, local_best as usize) {
+            let filtered = AvailDistances::without_bitmap::<W>(base, &newbits);
+            if let Some(dynamic_sum) = filtered.sum_k(rem - 1) {
                 let dynamic_bound = new_pos + dynamic_sum;
                 if rem < OGR_OPTIMAL.len() {
                     let static_bound = new_pos + OGR_OPTIMAL[rem];
@@ -372,7 +378,6 @@ fn dfs_parallel_recursive<const W: usize>(
     }
 
     if valid_gaps.len() == 1 {
-        // Single valid gap: just recurse directly
         let gap = valid_gaps[0];
         let nb = newbits_buf[0];
         let mut new_state = state;
@@ -389,7 +394,6 @@ fn dfs_parallel_recursive<const W: usize>(
         return;
     }
 
-    // Parallel processing of valid gaps
     valid_gaps.par_iter().zip(newbits_buf.par_iter()).for_each(|(&gap, &nb)| {
         let mut new_state = state;
         new_state.dist |= nb;
@@ -401,7 +405,6 @@ fn dfs_parallel_recursive<const W: usize>(
             new_state.first_gap = gap;
         }
         let mut local_gaps = vec![0u32; n - 1];
-        // Copy parent gaps (up to current depth)
         local_gaps[..state.depth - 1].copy_from_slice(&gaps[..state.depth - 1]);
         local_gaps[state.depth - 1] = gap;
 
@@ -463,6 +466,13 @@ fn dfs_serial<const W: usize>(
         return;
     }
 
+    // Precompute available distances for incremental bound
+    let base_avail = if rem >= 2 {
+        Some(AvailDistances::from_bitmap(&state.dist, rem - 1, *local_best as usize))
+    } else {
+        None
+    };
+
     let mut newbits = Bitmap::<W>::ZERO;
 
     for gap in 1..=gap_ceiling {
@@ -475,12 +485,11 @@ fn dfs_serial<const W: usize>(
             continue;
         }
 
-        // Dynamic lower bound
-        if rem >= 2 {
+        // Incremental dynamic lower bound
+        if let Some(ref base) = base_avail {
             let new_pos = state.pos + gap;
-            let mut test_dist = state.dist;
-            test_dist |= newbits;
-            if let Some(dynamic_sum) = test_dist.sum_smallest_unset(rem - 1, *local_best as usize) {
+            let filtered = AvailDistances::without_bitmap::<W>(base, &newbits);
+            if let Some(dynamic_sum) = filtered.sum_k(rem - 1) {
                 let dynamic_bound = new_pos + dynamic_sum;
                 if rem < OGR_OPTIMAL.len() {
                     let static_bound = new_pos + OGR_OPTIMAL[rem];
