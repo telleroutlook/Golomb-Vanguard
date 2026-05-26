@@ -259,6 +259,17 @@ fn enumerate_stubs<const W: usize>(
             }
         }
 
+        // Per-gap symmetry-aware static bound
+        if rem >= 2 && (rem - 1) < OGR_OPTIMAL.len() {
+            let child_first_gap = if state.depth == 1 { gap as u32 } else { state.first_gap };
+            if child_first_gap > 0 {
+                let sym_bound = (state.pos + gap as u32) + OGR_OPTIMAL[rem - 1] + child_first_gap + 1;
+                if sym_bound > max_len {
+                    continue;
+                }
+            }
+        }
+
         let mut new_state = state;
         new_state.dist |= newbits;
         new_state.ruler = newbits;
@@ -377,10 +388,35 @@ fn dfs_parallel_recursive<const W: usize>(
 ) {
     let rem = n - state.depth;
 
-    let mut newbits = state.ruler.shl(1);
-    let mut valid_gaps: SmallGapBuf = SmallGapBuf::new(gap_ceiling as usize);
+    // Hoisted per-gap static bound: gap + OGR_OPTIMAL[rem] < local_best - pos
+    let max_gap = local_best.saturating_sub(state.pos);
+    let mut tight_ceiling = gap_ceiling;
+    if rem < OGR_OPTIMAL.len() {
+        let static_ceil = max_gap.saturating_sub(OGR_OPTIMAL[rem]).saturating_sub(1);
+        if static_ceil < tight_ceiling {
+            tight_ceiling = static_ceil;
+        }
+    }
 
-    for gap in 1..=gap_ceiling {
+    // Hoisted per-gap symmetry-aware static bound
+    if rem >= 2 && (rem - 1) < OGR_OPTIMAL.len() {
+        if state.depth == 1 {
+            let sym_ceil = max_gap.saturating_sub(OGR_OPTIMAL[rem - 1]).saturating_sub(2) / 2;
+            if sym_ceil < tight_ceiling {
+                tight_ceiling = sym_ceil;
+            }
+        } else if state.first_gap > 0 {
+            let sym_ceil = max_gap.saturating_sub(OGR_OPTIMAL[rem - 1]).saturating_sub(state.first_gap).saturating_sub(2);
+            if sym_ceil < tight_ceiling {
+                tight_ceiling = sym_ceil;
+            }
+        }
+    }
+
+    let mut newbits = state.ruler.shl(1);
+    let mut valid_gaps: SmallGapBuf = SmallGapBuf::new(tight_ceiling as usize);
+
+    for gap in 1..=tight_ceiling {
         if gap > 1 {
             newbits.shl_one();
         }
@@ -389,23 +425,6 @@ fn dfs_parallel_recursive<const W: usize>(
         }
         if newbits.intersects(&state.dist) {
             continue;
-        }
-        if rem < OGR_OPTIMAL.len() {
-            let new_pos = state.pos + gap;
-            if new_pos + OGR_OPTIMAL[rem] >= local_best {
-                continue;
-            }
-        }
-
-        // Per-gap symmetry-aware static bound
-        if rem >= 2 && (rem - 1) < OGR_OPTIMAL.len() {
-            let child_first_gap = if state.depth == 1 { gap } else { state.first_gap };
-            if child_first_gap > 0 {
-                let sym_bound = (state.pos + gap) + OGR_OPTIMAL[rem - 1] + child_first_gap + 1;
-                if sym_bound >= local_best {
-                    continue;
-                }
-            }
         }
 
         valid_gaps.push(gap);
