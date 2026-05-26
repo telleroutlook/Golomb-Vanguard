@@ -209,6 +209,10 @@ fn generate_stubs<const W: usize>(n: usize, max_len: u32) -> Vec<(State<W>, Vec<
 
     if stubs.is_empty() {
         stubs.push((initial, vec![0u32; n - 1]));
+    } else {
+        // Heuristic: explore tightest-packing stubs first (smallest pos)
+        // so parallel threads find the global best early
+        stubs.sort_unstable_by_key(|(state, _)| state.pos);
     }
 
     stubs
@@ -272,7 +276,7 @@ fn enumerate_stubs<const W: usize>(
 
 /// Parallel DFS with local_best caching (Lock ③) and recursive work-stealing (Lock ④).
 const SYNC_INTERVAL: u32 = 50_000;
-const PARALLEL_GRAIN_DEPTH: usize = 6;
+const PARALLEL_GRAIN_DEPTH: usize = 7;
 
 fn dfs_parallel<const W: usize>(
     state: State<W>,
