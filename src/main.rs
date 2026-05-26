@@ -2,6 +2,7 @@ mod known;
 mod naive;
 mod bitmap;
 mod avail;
+mod construct;
 mod engine_v2;
 mod engine_v3;
 mod engine_v4;
@@ -44,8 +45,9 @@ fn main() {
 
     let known = known::optimal_length(n);
     let max_len = cli.max_len.or(known).unwrap_or_else(|| {
-        eprintln!("No known optimal value for OGR-{} and no --max-len specified", n);
-        std::process::exit(1);
+        let bound = construct::construct_bound(n);
+        eprintln!("No known optimal for OGR-{}, using constructive bound: {}", n, bound);
+        bound
     });
 
     let threads = cli.threads.unwrap_or_else(|| {
