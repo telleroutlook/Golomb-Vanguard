@@ -234,6 +234,17 @@ impl<const W: usize> Bitmap<W> {
         count
     }
 
+    /// Shift left by 1 bit in-place. Used for incremental gap enumeration.
+    #[inline(always)]
+    pub fn shl_one(&mut self) {
+        let mut i = W;
+        while i > 1 {
+            i -= 1;
+            self.words[i] = (self.words[i] << 1) | (self.words[i - 1] >> 63);
+        }
+        self.words[0] <<= 1;
+    }
+
     #[inline(always)]
     pub fn word(&self, i: usize) -> u64 {
         self.words[i]
