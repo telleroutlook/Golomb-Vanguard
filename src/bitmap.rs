@@ -106,6 +106,38 @@ impl<const W: usize> Bitmap<W> {
         result
     }
 
+    /// Shift right by `g` bits into a new bitmap.
+    #[inline(always)]
+    pub fn shr(&self, g: usize) -> Self {
+        if g == 0 {
+            return *self;
+        }
+        let mut result = Self::ZERO;
+        let word_off = g / 64;
+        let bit_off = g % 64;
+        if word_off >= W {
+            return result;
+        }
+        if bit_off == 0 {
+            let mut i = 0;
+            while i + word_off < W {
+                result.words[i] = self.words[i + word_off];
+                i += 1;
+            }
+        } else {
+            let inv = 64 - bit_off;
+            let mut i = 0;
+            while i + word_off < W {
+                result.words[i] = self.words[i + word_off] >> bit_off;
+                if i + word_off + 1 < W {
+                    result.words[i] |= self.words[i + word_off + 1] << inv;
+                }
+                i += 1;
+            }
+        }
+        result
+    }
+
     /// Shift left by `g` bits, writing result into `dst`.
     ///
     /// Handles three cases:
@@ -517,6 +549,72 @@ mod tests {
             let mut actual = Bitmap::<5>::ZERO;
             bm.shl_into(g, &mut actual);
             assert_eq!(actual, expected, "Mismatch at g={}", g);
+        }
+    }
+
+    #[test]
+    fn test_shr_basic() {
+        let mut bm: Bitmap<2> = Bitmap::ZERO;
+        bm.set_bit(5);
+        bm.set_bit(70);
+
+        let shifted = bm.shr(3);
+        assert!(shifted.get_bit(2));
+        assert!(shifted.get_bit(67));
+        assert!(!shifted.get_bit(5));
+    }
+
+    #[test]
+    fn test_shr_word_aligned() {
+        let mut bm: Bitmap<3> = Bitmap::ZERO;
+        bm.set_bit(0);
+        bm.set_bit(5);
+        bm.set_bit(64);
+        bm.set_bit(130);
+
+        let shifted = bm.shr(64);
+        assert!(shifted.get_bit(0));   // was 64
+        assert!(shifted.get_bit(66));  // was 130
+        assert!(!shifted.get_bit(5));
+    }
+
+    #[test]
+    fn test_shr_cross_word() {
+        let mut bm: Bitmap<2> = Bitmap::ZERO;
+        bm.set_bit(65); // word 1, bit 1
+
+        let shifted = bm.shr(3);
+        assert!(shifted.get_bit(62));
+    }
+
+    #[test]
+    fn test_shr_beyond_size() {
+        let mut bm: Bitmap<2> = Bitmap::ZERO;
+        bm.set_bit(0);
+        let shifted = bm.shr(128);
+        assert!(shifted.is_zero());
+    }
+
+    #[test]
+    fn test_shr_identity() {
+        let mut bm: Bitmap<2> = Bitmap::ZERO;
+        bm.set_bit(5);
+        bm.set_bit(100);
+        let shifted = bm.shr(0);
+        assert_eq!(shifted, bm);
+    }
+
+    #[test]
+    fn test_shr_shl_roundtrip() {
+        // Only test with g values where no bits are lost during shl
+        let mut bm: Bitmap<3> = Bitmap::ZERO;
+        bm.set_bit(10);
+        bm.set_bit(50);
+        // bits at 10 and 50; max safe shift = 192 - 51 = 141
+
+        for g in [1, 5, 32, 63, 64, 65, 100] {
+            let roundtrip = bm.shl(g).shr(g);
+            assert_eq!(roundtrip, bm, "Roundtrip failed at g={}", g);
         }
     }
 }

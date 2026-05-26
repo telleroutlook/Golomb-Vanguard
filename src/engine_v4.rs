@@ -413,17 +413,23 @@ fn dfs_parallel_recursive<const W: usize>(
         }
     }
 
-    let mut newbits = state.ruler.shl(1);
+    // Bitwise parallel gap pre-filtering:
+    // forbidden_gaps = union over marks k in ruler: (dist >> k)
+    // valid gaps = ~forbidden_gaps, iterated via trailing_zeros
+    let mut forbidden = Bitmap::<W>::ZERO;
+    for k in state.ruler.iter_set_bits() {
+        forbidden |= state.dist.shr(k as usize);
+    }
+    let mut valid = !forbidden;
+    valid.clear_bit(0); // gap 0 is never valid
+
     let mut valid_gaps: SmallGapBuf = SmallGapBuf::new(tight_ceiling as usize);
 
-    for gap in 1..=tight_ceiling {
-        if gap > 1 {
-            newbits.shl_one();
+    for gap in valid.iter_set_bits() {
+        if gap > tight_ceiling {
+            break;
         }
         if state.depth == n - 1 && gap <= state.first_gap {
-            continue;
-        }
-        if newbits.intersects(&state.dist) {
             continue;
         }
 
