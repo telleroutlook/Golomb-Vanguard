@@ -605,53 +605,107 @@ fn dfs_serial<const W: usize>(
         return;
     }
 
-    let mut newbits = state.ruler.shl(1);
     let mut had_child = false;
 
-    for gap in 1..=gap_ceiling {
-        if gap > 1 {
-            newbits.shl_one();
+    if gap_ceiling > state.depth as u32 + 2 {
+        // Bitwise pre-filtering path: cheaper when gap_ceiling >> depth
+        let mut forbidden = Bitmap::<W>::ZERO;
+        for k in state.ruler.iter_set_bits() {
+            forbidden |= state.dist.shr(k as usize);
         }
-        if state.depth == n - 1 && gap <= state.first_gap {
-            continue;
-        }
+        let mut valid = !forbidden;
+        valid.clear_bit(0);
 
-        if newbits.intersects(&state.dist) {
-            continue;
-        }
-
-        // Per-gap static bound
-        if rem < OGR_OPTIMAL.len() {
-            let new_pos = state.pos + gap;
-            if new_pos + OGR_OPTIMAL[rem] >= *local_best {
+        for gap in valid.iter_set_bits() {
+            if gap > gap_ceiling {
+                break;
+            }
+            if state.depth == n - 1 && gap <= state.first_gap {
                 continue;
             }
-        }
 
-        // Per-gap symmetry-aware static bound
-        if rem >= 2 && (rem - 1) < OGR_OPTIMAL.len() {
-            let child_first_gap = if state.depth == 1 { gap } else { state.first_gap };
-            if child_first_gap > 0 {
-                let sym_bound = (state.pos + gap) + OGR_OPTIMAL[rem - 1] + child_first_gap + 1;
-                if sym_bound >= *local_best {
+            // Per-gap static bound (local_best may have changed)
+            if rem < OGR_OPTIMAL.len() {
+                if state.pos + gap + OGR_OPTIMAL[rem] >= *local_best {
                     continue;
                 }
             }
-        }
 
-        let mut new_state = state;
-        new_state.dist |= newbits;
-        new_state.ruler = newbits;
-        new_state.ruler.set_bit(0);
-        new_state.pos += gap;
-        new_state.depth += 1;
-        if state.depth == 1 {
-            new_state.first_gap = gap;
-        }
+            // Per-gap symmetry-aware static bound
+            if rem >= 2 && (rem - 1) < OGR_OPTIMAL.len() {
+                let child_first_gap = if state.depth == 1 { gap } else { state.first_gap };
+                if child_first_gap > 0 {
+                    let sym_bound = (state.pos + gap) + OGR_OPTIMAL[rem - 1] + child_first_gap + 1;
+                    if sym_bound >= *local_best {
+                        continue;
+                    }
+                }
+            }
 
-        had_child = true;
-        gaps[state.depth - 1] = gap;
-        dfs_serial(new_state, n, local_best, global_best, gaps, best_marks, iter_count);
+            let newbits = state.ruler.shl(gap as usize);
+            let mut new_state = state;
+            new_state.dist |= newbits;
+            new_state.ruler = newbits;
+            new_state.ruler.set_bit(0);
+            new_state.pos += gap;
+            new_state.depth += 1;
+            if state.depth == 1 {
+                new_state.first_gap = gap;
+            }
+
+            had_child = true;
+            gaps[state.depth - 1] = gap;
+            dfs_serial(new_state, n, local_best, global_best, gaps, best_marks, iter_count);
+        }
+    } else {
+        // Incremental shl_one path: cheaper at deep depths
+        let mut newbits = state.ruler.shl(1);
+
+        for gap in 1..=gap_ceiling {
+            if gap > 1 {
+                newbits.shl_one();
+            }
+            if state.depth == n - 1 && gap <= state.first_gap {
+                continue;
+            }
+
+            if newbits.intersects(&state.dist) {
+                continue;
+            }
+
+            // Per-gap static bound
+            if rem < OGR_OPTIMAL.len() {
+                let new_pos = state.pos + gap;
+                if new_pos + OGR_OPTIMAL[rem] >= *local_best {
+                    continue;
+                }
+            }
+
+            // Per-gap symmetry-aware static bound
+            if rem >= 2 && (rem - 1) < OGR_OPTIMAL.len() {
+                let child_first_gap = if state.depth == 1 { gap } else { state.first_gap };
+                if child_first_gap > 0 {
+                    let sym_bound = (state.pos + gap) + OGR_OPTIMAL[rem - 1] + child_first_gap + 1;
+                    if sym_bound >= *local_best {
+                        continue;
+                    }
+                }
+            }
+
+            let mut new_state = state;
+            new_state.dist |= newbits;
+            new_state.ruler = newbits;
+            new_state.ruler.set_bit(0);
+            new_state.pos += gap;
+            new_state.depth += 1;
+            if state.depth == 1 {
+                new_state.first_gap = gap;
+            }
+
+            had_child = true;
+            gaps[state.depth - 1] = gap;
+            dfs_serial(new_state, n, local_best, global_best, gaps, best_marks, iter_count);
+        }
     }
 
     if !had_child {
