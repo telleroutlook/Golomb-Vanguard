@@ -172,19 +172,15 @@ impl<const W: usize> Bitmap<W> {
             if base > max_bit {
                 break;
             }
-            // Complement: unset bits become 1
             let mut unset = !self.words[word_idx];
-            // Skip distance 0 (bit 0 of word 0)
             if word_idx == 0 {
                 unset &= !1u64;
             }
-            // Mask out bits beyond max_bit
             let word_end = ((word_idx + 1) * 64).min(max_bit + 1);
             let bits_in_word = word_end - base;
             if bits_in_word < 64 {
                 unset &= (1u64 << bits_in_word) - 1;
             }
-            // Fast iteration using trailing_zeros
             while unset != 0 {
                 let bit = unset.trailing_zeros() as usize;
                 sum += (base + bit) as u32;
@@ -192,7 +188,54 @@ impl<const W: usize> Bitmap<W> {
                 if count == k {
                     return Some(sum);
                 }
-                unset &= unset - 1; // clear lowest set bit
+                unset &= unset - 1;
+            }
+        }
+        if count >= k {
+            Some(sum)
+        } else {
+            None
+        }
+    }
+
+    /// Symmetry-aware variant: at least one of the k distances must exceed first_gap.
+    /// If all k smallest are ≤ first_gap, replace the largest with the first > first_gap.
+    #[inline]
+    pub fn sum_smallest_unset_sym(&self, k: usize, max_bit: usize, first_gap: u32) -> Option<u32> {
+        if k == 0 {
+            return Some(0);
+        }
+        let mut sum: u32 = 0;
+        let mut count = 0;
+        let mut last_val: u32 = 0;
+        for word_idx in 0..W {
+            let base = word_idx * 64;
+            if base > max_bit {
+                break;
+            }
+            let mut unset = !self.words[word_idx];
+            if word_idx == 0 {
+                unset &= !1u64;
+            }
+            let word_end = ((word_idx + 1) * 64).min(max_bit + 1);
+            let bits_in_word = word_end - base;
+            if bits_in_word < 64 {
+                unset &= (1u64 << bits_in_word) - 1;
+            }
+            while unset != 0 {
+                let bit = unset.trailing_zeros() as usize;
+                let val = (base + bit) as u32;
+                unset &= unset - 1;
+                if count < k {
+                    sum += val;
+                    count += 1;
+                    last_val = val;
+                    if count == k && last_val > first_gap {
+                        return Some(sum);
+                    }
+                } else if val > first_gap {
+                    return Some(sum - last_val + val);
+                }
             }
         }
         if count >= k {

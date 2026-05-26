@@ -327,9 +327,18 @@ fn dfs_parallel<const W: usize>(
         }
     }
 
-    // Per-node dynamic bound: sum of rem smallest available distances
+    // Symmetry-aware static bound: OGR_OPTIMAL[rem] + first_gap + 1
+    // At least one remaining gap (g_{n-1}) must exceed first_gap
+    if state.first_gap > 0 && rem < OGR_OPTIMAL.len() && rem >= 2 {
+        let sym_bound = state.pos + OGR_OPTIMAL[rem] + state.first_gap + 1;
+        if sym_bound >= local_best {
+            return;
+        }
+    }
+
+    // Per-node dynamic bound: symmetry-aware sum of rem smallest available distances
     if rem >= 1 {
-        match state.dist.sum_smallest_unset(rem, local_best as usize) {
+        match state.dist.sum_smallest_unset_sym(rem, local_best as usize, state.first_gap) {
             Some(s) if state.pos + s < local_best => {}
             _ => return,
         }
@@ -385,6 +394,17 @@ fn dfs_parallel_recursive<const W: usize>(
             let new_pos = state.pos + gap;
             if new_pos + OGR_OPTIMAL[rem] >= local_best {
                 continue;
+            }
+        }
+
+        // Per-gap symmetry-aware static bound
+        if rem >= 2 && (rem - 1) < OGR_OPTIMAL.len() {
+            let child_first_gap = if state.depth == 1 { gap } else { state.first_gap };
+            if child_first_gap > 0 {
+                let sym_bound = (state.pos + gap) + OGR_OPTIMAL[rem - 1] + child_first_gap + 1;
+                if sym_bound >= local_best {
+                    continue;
+                }
             }
         }
 
@@ -534,9 +554,17 @@ fn dfs_serial<const W: usize>(
         }
     }
 
-    // Per-node dynamic bound: sum of rem smallest available distances
+    // Symmetry-aware static bound
+    if state.first_gap > 0 && rem < OGR_OPTIMAL.len() && rem >= 2 {
+        let sym_bound = state.pos + OGR_OPTIMAL[rem] + state.first_gap + 1;
+        if sym_bound >= *local_best {
+            return;
+        }
+    }
+
+    // Per-node dynamic bound: symmetry-aware
     if rem >= 1 {
-        match state.dist.sum_smallest_unset(rem, *local_best as usize) {
+        match state.dist.sum_smallest_unset_sym(rem, *local_best as usize, state.first_gap) {
             Some(s) if state.pos + s < *local_best => {}
             _ => return,
         }
@@ -572,6 +600,17 @@ fn dfs_serial<const W: usize>(
             let new_pos = state.pos + gap;
             if new_pos + OGR_OPTIMAL[rem] >= *local_best {
                 continue;
+            }
+        }
+
+        // Per-gap symmetry-aware static bound
+        if rem >= 2 && (rem - 1) < OGR_OPTIMAL.len() {
+            let child_first_gap = if state.depth == 1 { gap } else { state.first_gap };
+            if child_first_gap > 0 {
+                let sym_bound = (state.pos + gap) + OGR_OPTIMAL[rem - 1] + child_first_gap + 1;
+                if sym_bound >= *local_best {
+                    continue;
+                }
             }
         }
 
