@@ -116,58 +116,6 @@ pub fn find_optimal_dispatched(n: usize, start_bound: u32, threads: usize) -> Op
     }
 }
 
-pub fn find_dispatched(n: usize, max_len: u32, threads: usize) -> Option<Vec<u32>> {
-    find_optimal_dispatched(n, max_len, threads).map(|(_, m)| m)
-}
-
-/// Prove no ruler of length <= max_len exists (exhaustive parallel search).
-pub fn prove_impossible<const W: usize>(n: usize, max_len: u32, threads: usize) -> bool {
-    if n <= 1 {
-        return false;
-    }
-
-    let pool = rayon::ThreadPoolBuilder::new()
-        .num_threads(threads)
-        .build()
-        .unwrap_or_else(|_| rayon::ThreadPoolBuilder::new().build().unwrap());
-
-    let found = Arc::new(std::sync::atomic::AtomicBool::new(false));
-
-    pool.install(|| {
-        let stubs = generate_stubs::<W>(n, max_len);
-
-        stubs.into_par_iter().any(|(state, _)| {
-            if found.load(Ordering::Relaxed) {
-                return true;
-            }
-            let result = dfs_exists(state, n, max_len, &found);
-            if result {
-                found.store(true, Ordering::Relaxed);
-            }
-            result
-        })
-    });
-
-    !found.load(Ordering::Relaxed)
-}
-
-pub fn prove_impossible_dispatched(n: usize, max_len: u32, threads: usize) -> bool {
-    let words = crate::known::required_words(max_len);
-    match words {
-        1 => prove_impossible::<1>(n, max_len, threads),
-        2 => prove_impossible::<2>(n, max_len, threads),
-        3 => prove_impossible::<3>(n, max_len, threads),
-        4 => prove_impossible::<4>(n, max_len, threads),
-        5 => prove_impossible::<5>(n, max_len, threads),
-        6 => prove_impossible::<6>(n, max_len, threads),
-        7 => prove_impossible::<7>(n, max_len, threads),
-        8 => prove_impossible::<8>(n, max_len, threads),
-        9 => prove_impossible::<9>(n, max_len, threads),
-        10 => prove_impossible::<10>(n, max_len, threads),
-        _ => panic!("max_len too large: {}", max_len),
-    }
-}
-
 /// Generate stubs: enumerate all valid placements for the first STUB_DEPTH marks.
 /// Each stub becomes an independent work unit for parallel processing.
 fn generate_stubs<const W: usize>(n: usize, max_len: u32) -> Vec<(State<W>, Vec<u32>)> {
@@ -520,56 +468,6 @@ fn dfs_serial<const W: usize>(
     }
 }
 
-fn dfs_exists<const W: usize>(
-    state: State<W>,
-    n: usize,
-    max_len: u32,
-    found: &Arc<std::sync::atomic::AtomicBool>,
-) -> bool {
-    if found.load(Ordering::Relaxed) {
-        return true;
-    }
-    if state.depth == n {
-        return true;
-    }
-
-    let rem = n - state.depth;
-    let max_gap = max_len - state.pos;
-    let gap_ceiling = max_gap.saturating_sub(rem as u32 - 1);
-    if gap_ceiling == 0 {
-        return false;
-    }
-
-    let mut newbits = Bitmap::<W>::ZERO;
-
-    for gap in 1..=gap_ceiling {
-        if state.depth == n - 1 && gap <= state.first_gap {
-            continue;
-        }
-
-        state.ruler.shl_into(gap as usize, &mut newbits);
-        if newbits.intersects(&state.dist) {
-            continue;
-        }
-
-        let mut new_state = state;
-        new_state.dist |= newbits;
-        new_state.ruler = newbits;
-        new_state.ruler.set_bit(0);
-        new_state.pos += gap;
-        new_state.depth += 1;
-        if state.depth == 1 {
-            new_state.first_gap = gap;
-        }
-
-        if dfs_exists(new_state, n, max_len, found) {
-            return true;
-        }
-    }
-
-    false
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -606,9 +504,4 @@ mod tests {
         crate::naive::verify_golomb(&marks);
     }
 
-    #[test]
-    fn test_v4_prove_impossible() {
-        assert!(prove_impossible::<1>(6, 16, 2));
-        assert!(!prove_impossible::<1>(6, 17, 2));
-    }
 }

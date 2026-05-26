@@ -114,8 +114,10 @@ fn run_find(n: usize, max_len: u32, engine: &str, threads: usize) {
 }
 
 fn run_prove(n: usize, max_len: u32, engine: &str, threads: usize) {
-    // First, verify we can find the known optimal
-    eprintln!("Step 1: Verifying ruler exists at length {}...", max_len);
+    // find_optimal exhaustively searches all rulers ≤ max_len.
+    // If the shortest found equals max_len, optimality is proven
+    // (no shorter ruler exists — the search was exhaustive).
+    eprintln!("Proving OGR-{} optimal: exhaustive search at length {}...", n, max_len);
     let start = Instant::now();
 
     let found = match engine {
@@ -129,40 +131,21 @@ fn run_prove(n: usize, max_len: u32, engine: &str, threads: usize) {
         }
     };
 
+    let elapsed = start.elapsed();
+
     match found {
         Some((len, marks)) => {
-            println!("Found ruler at length {}: {:?}", len, marks);
+            if len == max_len {
+                println!("PROVEN: OGR-{} = {} (optimal, exhaustive search found no shorter ruler)", n, max_len);
+                println!("Marks: {:?}", marks);
+            } else {
+                println!("NOT PROVEN: found shorter ruler (length {} < {})", len, max_len);
+                println!("Marks: {:?}", marks);
+            }
         }
         None => {
-            println!("No ruler found at length {} — already proven impossible!", max_len);
-            return;
+            println!("No ruler with {} marks of length <= {} exists.", n, max_len);
         }
     }
-    eprintln!("Find time: {:.3}s", start.elapsed().as_secs_f64());
-
-    // Now prove length-1 is impossible
-    if max_len == 0 {
-        eprintln!("Cannot prove below length 0.");
-        return;
-    }
-    let prove_len = max_len - 1;
-    eprintln!("Step 2: Proving no ruler exists at length {}...", prove_len);
-
-    let prove_start = Instant::now();
-    let impossible = match engine {
-        "v1" => !naive::exists(n, prove_len),
-        "v2" => !engine_v2::exists_dispatched(n, prove_len),
-        "v3" => engine_v3::prove_impossible_dispatched(n, prove_len),
-        "v4" => engine_v4::prove_impossible_dispatched(n, prove_len, threads),
-        _ => false,
-    };
-    let prove_elapsed = prove_start.elapsed();
-
-    if impossible {
-        println!("PROVEN: OGR-{} = {} (optimal, no shorter ruler exists)", n, max_len);
-    } else {
-        println!("NOT PROVEN: A ruler with {} marks of length <= {} may exist.", n, prove_len);
-    }
-    eprintln!("Proof time: {:.3}s", prove_elapsed.as_secs_f64());
-    eprintln!("Total time: {:.3}s", start.elapsed().as_secs_f64());
+    eprintln!("Time: {:.3}s", elapsed.as_secs_f64());
 }
