@@ -296,138 +296,118 @@ fn dfs_parallel_recursive<const W: usize>(
     gap_ceiling: u32,
 ) {
     let rem = n - state.depth;
-    let gc = gap_ceiling as usize;
 
+    // Collect valid gaps. Only store the gap value (not the bitmap — that's
+    // W-dependent and large). Recompute the shift in the child closure; one
+    // O(W) shift per child is negligible against the subtree it explores.
     let mut newbits = state.ruler.shl(1);
 
-    if gc <= MAX_INLINE_GAPS {
-        // Fast path: stack-allocated buffers (avoids per-node malloc/free)
-        let mut valid_gaps = [0u32; MAX_INLINE_GAPS];
-        let mut newbits_buf = [Bitmap::<W>::ZERO; MAX_INLINE_GAPS];
-        let mut count: usize = 0;
+    let mut valid_gaps: SmallGapBuf = SmallGapBuf::new(gap_ceiling as usize);
 
-        for gap in 1..=gap_ceiling {
-            if gap > 1 {
-                newbits.shl_one();
-            }
-            if state.depth == n - 1 && gap <= state.first_gap {
+    for gap in 1..=gap_ceiling {
+        if gap > 1 {
+            newbits.shl_one();
+        }
+        if state.depth == n - 1 && gap <= state.first_gap {
+            continue;
+        }
+        if newbits.intersects(&state.dist) {
+            continue;
+        }
+        if rem < OGR_OPTIMAL.len() {
+            let new_pos = state.pos + gap;
+            if new_pos + OGR_OPTIMAL[rem] >= local_best {
                 continue;
             }
-            if newbits.intersects(&state.dist) {
-                continue;
-            }
-            if rem < OGR_OPTIMAL.len() {
-                let new_pos = state.pos + gap;
-                if new_pos + OGR_OPTIMAL[rem] >= local_best {
-                    continue;
-                }
-            }
-
-            valid_gaps[count] = gap;
-            newbits_buf[count] = newbits;
-            count += 1;
         }
 
-        if count == 0 {
-            return;
+        valid_gaps.push(gap);
+    }
+
+    if valid_gaps.is_empty() {
+        return;
+    }
+
+    let make_child = |gap: u32| -> State<W> {
+        let nb = state.ruler.shl(gap as usize);
+        let mut new_state = state;
+        new_state.dist |= nb;
+        new_state.ruler = nb;
+        new_state.ruler.set_bit(0);
+        new_state.pos += gap;
+        new_state.depth += 1;
+        if state.depth == 1 {
+            new_state.first_gap = gap;
         }
+        new_state
+    };
 
-        if count == 1 {
-            let gap = valid_gaps[0];
-            let nb = newbits_buf[0];
-            let mut new_state = state;
-            new_state.dist |= nb;
-            new_state.ruler = nb;
-            new_state.ruler.set_bit(0);
-            new_state.pos += gap;
-            new_state.depth += 1;
-            if state.depth == 1 {
-                new_state.first_gap = gap;
-            }
-            gaps[state.depth - 1] = gap;
-            dfs_parallel(new_state, n, global_best, local_best, gaps, best_marks, node_count, iter_count);
-            return;
+    if valid_gaps.len() == 1 {
+        let gap = valid_gaps.get(0);
+        let new_state = make_child(gap);
+        gaps[state.depth - 1] = gap;
+        dfs_parallel(new_state, n, global_best, local_best, gaps, best_marks, node_count, iter_count);
+        return;
+    }
+
+    valid_gaps.as_slice().par_iter().for_each(|&gap| {
+        let new_state = make_child(gap);
+        let mut local_gaps = [0u32; 64];
+        local_gaps[..state.depth - 1].copy_from_slice(&gaps[..state.depth - 1]);
+        local_gaps[state.depth - 1] = gap;
+
+        dfs_parallel(new_state, n, global_best, local_best, &mut local_gaps[..n - 1], best_marks, node_count, 0);
+    });
+}
+
+/// Stack-allocated gap buffer that falls back to Vec for large gap ceilings.
+struct SmallGapBuf {
+    inline: [u32; MAX_INLINE_GAPS],
+    heap: Option<Vec<u32>>,
+    len: usize,
+}
+
+impl SmallGapBuf {
+    fn new(capacity: usize) -> Self {
+        Self {
+            inline: [0; MAX_INLINE_GAPS],
+            heap: if capacity > MAX_INLINE_GAPS { Some(Vec::with_capacity(capacity)) } else { None },
+            len: 0,
         }
+    }
 
-        valid_gaps[..count].par_iter().zip(newbits_buf[..count].par_iter()).for_each(|(&gap, &nb)| {
-            let mut new_state = state;
-            new_state.dist |= nb;
-            new_state.ruler = nb;
-            new_state.ruler.set_bit(0);
-            new_state.pos += gap;
-            new_state.depth += 1;
-            if state.depth == 1 {
-                new_state.first_gap = gap;
-            }
-            let mut local_gaps = [0u32; 64];
-            local_gaps[..state.depth - 1].copy_from_slice(&gaps[..state.depth - 1]);
-            local_gaps[state.depth - 1] = gap;
-
-            dfs_parallel(new_state, n, global_best, local_best, &mut local_gaps[..n - 1], best_marks, node_count, 0);
-        });
-    } else {
-        // Slow path: heap allocation for unusually large gap_ceiling
-        let mut valid_gaps: Vec<u32> = Vec::with_capacity(gc);
-        let mut newbits_buf: Vec<Bitmap<W>> = Vec::with_capacity(gc);
-
-        for gap in 1..=gap_ceiling {
-            if gap > 1 {
-                newbits.shl_one();
-            }
-            if state.depth == n - 1 && gap <= state.first_gap {
-                continue;
-            }
-            if newbits.intersects(&state.dist) {
-                continue;
-            }
-            if rem < OGR_OPTIMAL.len() {
-                let new_pos = state.pos + gap;
-                if new_pos + OGR_OPTIMAL[rem] >= local_best {
-                    continue;
-                }
-            }
-
-            valid_gaps.push(gap);
-            newbits_buf.push(newbits);
+    fn push(&mut self, val: u32) {
+        if let Some(ref mut heap) = self.heap {
+            heap.push(val);
+        } else {
+            debug_assert!(self.len < MAX_INLINE_GAPS);
+            self.inline[self.len] = val;
         }
+        self.len += 1;
+    }
 
-        if valid_gaps.is_empty() {
-            return;
+    fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    fn len(&self) -> usize {
+        self.len
+    }
+
+    fn as_slice(&self) -> &[u32] {
+        if let Some(ref heap) = self.heap {
+            heap.as_slice()
+        } else {
+            &self.inline[..self.len]
         }
+    }
 
-        if valid_gaps.len() == 1 {
-            let gap = valid_gaps[0];
-            let nb = newbits_buf[0];
-            let mut new_state = state;
-            new_state.dist |= nb;
-            new_state.ruler = nb;
-            new_state.ruler.set_bit(0);
-            new_state.pos += gap;
-            new_state.depth += 1;
-            if state.depth == 1 {
-                new_state.first_gap = gap;
-            }
-            gaps[state.depth - 1] = gap;
-            dfs_parallel(new_state, n, global_best, local_best, gaps, best_marks, node_count, iter_count);
-            return;
+    fn get(&self, idx: usize) -> u32 {
+        if let Some(ref heap) = self.heap {
+            heap[idx]
+        } else {
+            self.inline[idx]
         }
-
-        valid_gaps.par_iter().zip(newbits_buf.par_iter()).for_each(|(&gap, &nb)| {
-            let mut new_state = state;
-            new_state.dist |= nb;
-            new_state.ruler = nb;
-            new_state.ruler.set_bit(0);
-            new_state.pos += gap;
-            new_state.depth += 1;
-            if state.depth == 1 {
-                new_state.first_gap = gap;
-            }
-            let mut local_gaps = [0u32; 64];
-            local_gaps[..state.depth - 1].copy_from_slice(&gaps[..state.depth - 1]);
-            local_gaps[state.depth - 1] = gap;
-
-            dfs_parallel(new_state, n, global_best, local_best, &mut local_gaps[..n - 1], best_marks, node_count, 0);
-        });
     }
 }
 
