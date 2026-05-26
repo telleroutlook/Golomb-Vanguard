@@ -59,12 +59,16 @@ struct State<const W: usize> {
     first_gap: u32,
 }
 
-/// Per-thread statistics. Thread-local, zero contention.
+#[cfg(feature = "stats")]
+use std::cell::RefCell;
+
+#[cfg(feature = "stats")]
 struct ThreadStats {
     nodes: u64,
     dead_ends: [u64; 32],
 }
 
+#[cfg(feature = "stats")]
 impl ThreadStats {
     fn new() -> Self {
         Self {
@@ -74,16 +78,28 @@ impl ThreadStats {
     }
 }
 
-use std::cell::RefCell;
-
+#[cfg(feature = "stats")]
 thread_local! {
     static THREAD_STATS: RefCell<ThreadStats> = RefCell::new(ThreadStats::new());
 }
 
-/// Aggregated stats across all threads.
-pub struct Stats {
-    pub total_nodes: u64,
-    pub dead_ends: [u64; 32],
+macro_rules! stat_inc_nodes {
+    () => {
+        #[cfg(feature = "stats")]
+        THREAD_STATS.with(|ts| ts.borrow_mut().nodes += 1);
+    };
+}
+
+macro_rules! stat_inc_dead_end {
+    ($depth:expr) => {
+        #[cfg(feature = "stats")]
+        {
+            let d = $depth;
+            if d < 32 {
+                THREAD_STATS.with(|ts| ts.borrow_mut().dead_ends[d] += 1);
+            }
+        }
+    };
 }
 
 /// Find the shortest Golomb ruler with `n` marks using all threads.
@@ -99,14 +115,17 @@ pub fn find_optimal<const W: usize>(n: usize, start_bound: u32, threads: usize) 
 
     let global_best = Arc::new(AlignedAtomicU32::new(start_bound + 1));
     let best_marks: Arc<std::sync::Mutex<Option<(u32, Vec<u32>)>>> = Arc::new(std::sync::Mutex::new(None));
+
+    #[cfg(feature = "stats")]
     let agg_nodes: Arc<std::sync::atomic::AtomicU64> = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    #[cfg(feature = "stats")]
     let agg_dead_ends: Arc<std::sync::Mutex<[u64; 32]>> = Arc::new(std::sync::Mutex::new([0u64; 32]));
 
     pool.install(|| {
         let stubs = generate_stubs::<W>(n, start_bound);
 
         stubs.into_par_iter().for_each(|(state, gaps)| {
-            // Reset thread-local stats at the start of each stub
+            #[cfg(feature = "stats")]
             THREAD_STATS.with(|ts| {
                 *ts.borrow_mut() = ThreadStats::new();
             });
@@ -123,7 +142,7 @@ pub fn find_optimal<const W: usize>(n: usize, start_bound: u32, threads: usize) 
                 0,
             );
 
-            // Flush thread-local stats to shared aggregators
+            #[cfg(feature = "stats")]
             THREAD_STATS.with(|ts| {
                 let ts = ts.borrow();
                 agg_nodes.fetch_add(ts.nodes, Ordering::Relaxed);
@@ -135,14 +154,16 @@ pub fn find_optimal<const W: usize>(n: usize, start_bound: u32, threads: usize) 
         });
     });
 
-    let total_nodes = agg_nodes.load(Ordering::Relaxed);
-    eprintln!("STAT: total_nodes = {}", total_nodes);
-
-    let dead_ends = *agg_dead_ends.lock().unwrap();
-    eprintln!("STAT: dead_ends_by_depth:");
-    for d in 1..n {
-        if dead_ends[d] > 0 {
-            eprintln!("  depth {:2}: {}", d, dead_ends[d]);
+    #[cfg(feature = "stats")]
+    {
+        let total_nodes = agg_nodes.load(Ordering::Relaxed);
+        eprintln!("STAT: total_nodes = {}", total_nodes);
+        let dead_ends = *agg_dead_ends.lock().unwrap();
+        eprintln!("STAT: dead_ends_by_depth:");
+        for d in 1..n {
+            if dead_ends[d] > 0 {
+                eprintln!("  depth {:2}: {}", d, dead_ends[d]);
+            }
         }
     }
 
@@ -262,7 +283,7 @@ fn dfs_parallel<const W: usize>(
     best_marks: &Arc<std::sync::Mutex<Option<(u32, Vec<u32>)>>>,
     mut iter_count: u32,
 ) {
-    THREAD_STATS.with(|ts| ts.borrow_mut().nodes += 1);
+    stat_inc_nodes!();
 
     if state.depth == n {
         if state.pos < local_best {
@@ -367,14 +388,8 @@ fn dfs_parallel_recursive<const W: usize>(
     }
 
     if valid_gaps.is_empty() {
-        // Dead end: no surviving children at this node
-        THREAD_STATS.with(|ts| {
-            let mut ts = ts.borrow_mut();
-            ts.nodes += 1; // Count this node itself
-            if state.depth < 32 {
-                ts.dead_ends[state.depth] += 1;
-            }
-        });
+        stat_inc_nodes!();
+        stat_inc_dead_end!(state.depth);
         return;
     }
 
@@ -393,8 +408,7 @@ fn dfs_parallel_recursive<const W: usize>(
     };
 
     if valid_gaps.len() == 1 {
-        // Count this node (single-child path)
-        THREAD_STATS.with(|ts| ts.borrow_mut().nodes += 1);
+        stat_inc_nodes!();
         let gap = valid_gaps.get(0);
         let new_state = make_child(gap);
         gaps[state.depth - 1] = gap;
@@ -402,8 +416,7 @@ fn dfs_parallel_recursive<const W: usize>(
         return;
     }
 
-    // Count this node (multi-child parallel path)
-    THREAD_STATS.with(|ts| ts.borrow_mut().nodes += 1);
+    stat_inc_nodes!();
 
     valid_gaps.as_slice().par_iter().for_each(|&gap| {
         let new_state = make_child(gap);
@@ -475,7 +488,7 @@ fn dfs_serial<const W: usize>(
     best_marks: &Arc<std::sync::Mutex<Option<(u32, Vec<u32>)>>>,
     mut iter_count: u32,
 ) {
-    THREAD_STATS.with(|ts| ts.borrow_mut().nodes += 1);
+    stat_inc_nodes!();
 
     if state.depth == n {
         if state.pos < *local_best {
@@ -531,12 +544,7 @@ fn dfs_serial<const W: usize>(
     }
     let gap_ceiling = max_gap.saturating_sub(rem as u32 - 1);
     if gap_ceiling == 0 {
-        // Dead end: gap_ceiling collapsed to zero
-        THREAD_STATS.with(|ts| {
-            if state.depth < 32 {
-                ts.borrow_mut().dead_ends[state.depth] += 1;
-            }
-        });
+        stat_inc_dead_end!(state.depth);
         return;
     }
 
@@ -579,12 +587,7 @@ fn dfs_serial<const W: usize>(
     }
 
     if !had_child {
-        // Dead end: all gaps were filtered
-        THREAD_STATS.with(|ts| {
-            if state.depth < 32 {
-                ts.borrow_mut().dead_ends[state.depth] += 1;
-            }
-        });
+        stat_inc_dead_end!(state.depth);
     }
 }
 
