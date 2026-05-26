@@ -13,7 +13,7 @@ use crate::avail::AvailDistances;
 use crate::bitmap::Bitmap;
 use crate::known::OGR_OPTIMAL;
 use rayon::prelude::*;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
 
 /// Cache-line aligned atomic best to avoid false sharing.
@@ -70,7 +70,8 @@ pub fn find_optimal<const W: usize>(n: usize, start_bound: u32, threads: usize) 
         .unwrap_or_else(|_| rayon::ThreadPoolBuilder::new().build().unwrap());
 
     let global_best = Arc::new(AlignedAtomicU32::new(start_bound + 1));
-    let best_marks: Arc<std::sync::Mutex<Option<Vec<u32>>>> = Arc::new(std::sync::Mutex::new(None));
+    let best_marks: Arc<std::sync::Mutex<Option<(u32, Vec<u32>)>>> = Arc::new(std::sync::Mutex::new(None));
+    let node_count = Arc::new(AtomicU64::new(0));
 
     pool.install(|| {
         // Generate initial stubs by enumerating first few gaps
@@ -86,13 +87,17 @@ pub fn find_optimal<const W: usize>(n: usize, start_bound: u32, threads: usize) 
                 local_best,
                 &mut local_gaps,
                 &best_marks,
+                &node_count,
                 0,
             );
         });
     });
 
-    let marks = best_marks.lock().unwrap().take();
-    marks.map(|m| (global_best.load(), m))
+    let total_nodes = node_count.load(Ordering::Relaxed);
+    eprintln!("STAT: total_nodes = {}", total_nodes);
+
+    let result = best_marks.lock().unwrap().take();
+    result
 }
 
 pub fn find_optimal_dispatched(n: usize, start_bound: u32, threads: usize) -> Option<(u32, Vec<u32>)> {
@@ -251,6 +256,7 @@ fn enumerate_stubs<const W: usize>(
 /// Parallel DFS with local_best caching (Lock ③) and recursive work-stealing (Lock ④).
 const SYNC_INTERVAL: u32 = 50_000;
 const PARALLEL_GRAIN_DEPTH: usize = 6; // Switch to serial when rem <= this
+const USE_DYNAMIC_BOUND: bool = true;
 
 fn dfs_parallel<const W: usize>(
     state: State<W>,
@@ -258,20 +264,24 @@ fn dfs_parallel<const W: usize>(
     global_best: &AlignedAtomicU32,
     mut local_best: u32,
     gaps: &mut [u32],
-    best_marks: &Arc<std::sync::Mutex<Option<Vec<u32>>>>,
+    best_marks: &Arc<std::sync::Mutex<Option<(u32, Vec<u32>)>>>,
+    node_count: &AtomicU64,
     mut iter_count: u32,
 ) {
+    node_count.fetch_add(1, Ordering::Relaxed);
     if state.depth == n {
         if state.pos < local_best {
-            local_best = state.pos;
-            global_best.try_update(state.pos);
             let mut marks = vec![0u32; n];
             marks[0] = 0;
             for i in 0..n - 1 {
                 marks[i + 1] = marks[i] + gaps[i];
             }
-            if let Ok(mut guard) = best_marks.lock() {
-                *guard = Some(marks);
+
+            let mut guard = best_marks.lock().unwrap();
+            let current_best = guard.as_ref().map(|(l, _)| *l).unwrap_or(u32::MAX);
+            if state.pos < current_best {
+                *guard = Some((state.pos, marks));
+                global_best.try_update(state.pos);
             }
         }
         return;
@@ -289,11 +299,19 @@ fn dfs_parallel<const W: usize>(
         }
     }
 
-    // Branch & bound: static + dynamic lower bounds
+    // Branch & bound: static lower bound
     if rem + 1 < OGR_OPTIMAL.len() {
         let static_bound = state.pos + OGR_OPTIMAL[rem + 1];
         if static_bound >= local_best {
             return;
+        }
+    }
+
+    // Per-node dynamic bound: sum of rem smallest available distances
+    if rem >= 1 {
+        match state.dist.sum_smallest_unset(rem, local_best as usize) {
+            Some(s) if state.pos + s < local_best => {}
+            _ => return,
         }
     }
 
@@ -310,11 +328,11 @@ fn dfs_parallel<const W: usize>(
     if rem > PARALLEL_GRAIN_DEPTH {
         // Parallel path: use rayon::join for binary splitting
         dfs_parallel_recursive::<W>(
-            state, n, global_best, local_best, gaps, best_marks, iter_count, gap_ceiling,
+            state, n, global_best, local_best, gaps, best_marks, node_count, iter_count, gap_ceiling,
         );
     } else {
         // Serial path: standard DFS
-        dfs_serial::<W>(state, n, &mut local_best, global_best, gaps, best_marks, iter_count);
+        dfs_serial::<W>(state, n, &mut local_best, global_best, gaps, best_marks, node_count, iter_count);
     }
 }
 
@@ -324,14 +342,15 @@ fn dfs_parallel_recursive<const W: usize>(
     global_best: &AlignedAtomicU32,
     local_best: u32,
     gaps: &mut [u32],
-    best_marks: &Arc<std::sync::Mutex<Option<Vec<u32>>>>,
+    best_marks: &Arc<std::sync::Mutex<Option<(u32, Vec<u32>)>>>,
+    node_count: &AtomicU64,
     iter_count: u32,
     gap_ceiling: u32,
 ) {
     let rem = n - state.depth;
 
     // Precompute available distances for incremental bound
-    let base_avail = if rem >= 2 {
+    let base_avail = if USE_DYNAMIC_BOUND && rem >= 2 {
         Some(AvailDistances::from_bitmap(&state.dist, rem - 1, local_best as usize))
     } else {
         None
@@ -352,7 +371,15 @@ fn dfs_parallel_recursive<const W: usize>(
             continue;
         }
 
-        // Incremental dynamic lower bound
+        // Per-gap static bound
+        if rem < OGR_OPTIMAL.len() {
+            let new_pos = state.pos + gap;
+            if new_pos + OGR_OPTIMAL[rem] >= local_best {
+                continue;
+            }
+        }
+
+        // Incremental dynamic lower bound (disabled when USE_DYNAMIC_BOUND=false)
         if let Some(ref base) = base_avail {
             let new_pos = state.pos + gap;
             let filtered = AvailDistances::without_bitmap::<W>(base, &newbits);
@@ -390,7 +417,7 @@ fn dfs_parallel_recursive<const W: usize>(
             new_state.first_gap = gap;
         }
         gaps[state.depth - 1] = gap;
-        dfs_parallel(new_state, n, global_best, local_best, gaps, best_marks, iter_count);
+        dfs_parallel(new_state, n, global_best, local_best, gaps, best_marks, node_count, iter_count);
         return;
     }
 
@@ -404,11 +431,11 @@ fn dfs_parallel_recursive<const W: usize>(
         if state.depth == 1 {
             new_state.first_gap = gap;
         }
-        let mut local_gaps = vec![0u32; n - 1];
+        let mut local_gaps = [0u32; 64];
         local_gaps[..state.depth - 1].copy_from_slice(&gaps[..state.depth - 1]);
         local_gaps[state.depth - 1] = gap;
 
-        dfs_parallel(new_state, n, global_best, local_best, &mut local_gaps, best_marks, 0);
+        dfs_parallel(new_state, n, global_best, local_best, &mut local_gaps[..n - 1], best_marks, node_count, 0);
     });
 }
 
@@ -418,20 +445,26 @@ fn dfs_serial<const W: usize>(
     local_best: &mut u32,
     global_best: &AlignedAtomicU32,
     gaps: &mut [u32],
-    best_marks: &Arc<std::sync::Mutex<Option<Vec<u32>>>>,
+    best_marks: &Arc<std::sync::Mutex<Option<(u32, Vec<u32>)>>>,
+    node_count: &AtomicU64,
     mut iter_count: u32,
 ) {
+    node_count.fetch_add(1, Ordering::Relaxed);
     if state.depth == n {
         if state.pos < *local_best {
             *local_best = state.pos;
-            global_best.try_update(state.pos);
+
             let mut marks = vec![0u32; n];
             marks[0] = 0;
             for i in 0..n - 1 {
                 marks[i + 1] = marks[i] + gaps[i];
             }
-            if let Ok(mut guard) = best_marks.lock() {
-                *guard = Some(marks);
+
+            let mut guard = best_marks.lock().unwrap();
+            let current_best = guard.as_ref().map(|(l, _)| *l).unwrap_or(u32::MAX);
+            if state.pos < current_best {
+                *guard = Some((state.pos, marks));
+                global_best.try_update(state.pos);
             }
         }
         return;
@@ -449,11 +482,19 @@ fn dfs_serial<const W: usize>(
         }
     }
 
-    // Branch & bound
+    // Branch & bound: static lower bound
     if rem + 1 < OGR_OPTIMAL.len() {
         let static_bound = state.pos + OGR_OPTIMAL[rem + 1];
         if static_bound >= *local_best {
             return;
+        }
+    }
+
+    // Per-node dynamic bound: sum of rem smallest available distances
+    if rem >= 1 {
+        match state.dist.sum_smallest_unset(rem, *local_best as usize) {
+            Some(s) if state.pos + s < *local_best => {}
+            _ => return,
         }
     }
 
@@ -467,7 +508,7 @@ fn dfs_serial<const W: usize>(
     }
 
     // Precompute available distances for incremental bound
-    let base_avail = if rem >= 2 {
+    let base_avail = if USE_DYNAMIC_BOUND && rem >= 2 {
         Some(AvailDistances::from_bitmap(&state.dist, rem - 1, *local_best as usize))
     } else {
         None
@@ -485,7 +526,15 @@ fn dfs_serial<const W: usize>(
             continue;
         }
 
-        // Incremental dynamic lower bound
+        // Per-gap static bound
+        if rem < OGR_OPTIMAL.len() {
+            let new_pos = state.pos + gap;
+            if new_pos + OGR_OPTIMAL[rem] >= *local_best {
+                continue;
+            }
+        }
+
+        // Incremental dynamic lower bound (disabled when USE_DYNAMIC_BOUND=false)
         if let Some(ref base) = base_avail {
             let new_pos = state.pos + gap;
             let filtered = AvailDistances::without_bitmap::<W>(base, &newbits);
@@ -513,7 +562,7 @@ fn dfs_serial<const W: usize>(
         }
 
         gaps[state.depth - 1] = gap;
-        dfs_serial(new_state, n, local_best, global_best, gaps, best_marks, iter_count);
+        dfs_serial(new_state, n, local_best, global_best, gaps, best_marks, node_count, iter_count);
     }
 }
 
@@ -578,6 +627,7 @@ mod tests {
             let expected = optimal_length(n).unwrap();
             let (len, marks) = find_optimal::<2>(n, expected + 5, 2).unwrap();
             assert_eq!(len, expected, "V4 OGR-{} should be {}, got {}", n, expected, len);
+            assert_eq!(*marks.last().unwrap(), len, "V4 OGR-{} ruler length mismatch", n);
             crate::naive::verify_golomb(&marks);
         }
     }
@@ -589,6 +639,7 @@ mod tests {
             let expected = optimal_length(n).unwrap();
             let (len, marks) = find_optimal_dispatched(n, expected + 5, 4).unwrap();
             assert_eq!(len, expected, "V4 OGR-{} should be {}, got {}", n, expected, len);
+            assert_eq!(*marks.last().unwrap(), len, "V4 OGR-{} ruler length mismatch", n);
             crate::naive::verify_golomb(&marks);
         }
     }
@@ -597,6 +648,7 @@ mod tests {
     fn test_v4_ogr_10() {
         let (len, marks) = find_optimal::<1>(10, 55, 2).unwrap();
         assert_eq!(len, 55);
+        assert_eq!(*marks.last().unwrap(), 55);
         crate::naive::verify_golomb(&marks);
     }
 
