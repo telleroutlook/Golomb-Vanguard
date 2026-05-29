@@ -80,15 +80,15 @@ fn dfs_find<const W: usize>(
         new_state.dist |= newbits;
         new_state.ruler = newbits;
         new_state.ruler.set_bit(0);
-        new_state.pos += gap as u32;
+        new_state.pos += gap;
         new_state.depth = state.depth + 1;
         if state.depth == 1 {
-            new_state.first_gap = gap as u32;
+            new_state.first_gap = gap;
         } else {
             new_state.first_gap = state.first_gap;
         }
 
-        gaps[gap_idx] = gap as u32;
+        gaps[gap_idx] = gap;
         if dfs_find(new_state, n, max_len, gaps, gap_idx + 1) {
             return true;
         }
@@ -99,6 +99,7 @@ fn dfs_find<const W: usize>(
 }
 
 /// Check existence exhaustively (for proof mode).
+#[allow(dead_code)]
 pub fn exists<const W: usize>(n: usize, max_len: u32) -> bool {
     if n <= 1 {
         return true;
@@ -117,10 +118,12 @@ pub fn exists<const W: usize>(n: usize, max_len: u32) -> bool {
     dfs_exists(state, n, max_len)
 }
 
+#[allow(dead_code)]
 pub fn exists_dispatched(n: usize, max_len: u32) -> bool {
     dispatch!(n, max_len, exists)
 }
 
+#[allow(dead_code)]
 fn dfs_exists<const W: usize>(state: State<W>, n: usize, max_len: u32) -> bool {
     if state.depth == n {
         return true;
@@ -143,10 +146,10 @@ fn dfs_exists<const W: usize>(state: State<W>, n: usize, max_len: u32) -> bool {
         new_state.dist |= newbits;
         new_state.ruler = newbits;
         new_state.ruler.set_bit(0);
-        new_state.pos += gap as u32;
+        new_state.pos += gap;
         new_state.depth += 1;
         if state.depth == 1 {
-            new_state.first_gap = gap as u32;
+            new_state.first_gap = gap;
         } else {
             new_state.first_gap = state.first_gap;
         }

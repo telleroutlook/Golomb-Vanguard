@@ -18,6 +18,7 @@ impl<const W: usize> Default for Bitmap<W> {
 impl<const W: usize> Bitmap<W> {
     pub const ZERO: Self = Self { words: [0; W] };
 
+    #[allow(dead_code)]
     pub const fn one() -> Self {
         let mut words = [0u64; W];
         words[0] = 1;
@@ -34,6 +35,7 @@ impl<const W: usize> Bitmap<W> {
     }
 
     #[inline(always)]
+    #[allow(dead_code)]
     pub fn get_bit(&self, bit: usize) -> bool {
         let word = bit / 64;
         let offset = bit % 64;
@@ -54,6 +56,7 @@ impl<const W: usize> Bitmap<W> {
     }
 
     #[inline(always)]
+    #[allow(dead_code)]
     pub fn is_zero(&self) -> bool {
         let mut acc = 0u64;
         for i in 0..W {
@@ -74,6 +77,7 @@ impl<const W: usize> Bitmap<W> {
     }
 
     /// Count trailing zeros (index of lowest set bit), or None if zero.
+    #[allow(dead_code)]
     pub fn ctz(&self) -> Option<u32> {
         for i in 0..W {
             if self.words[i] != 0 {
@@ -89,6 +93,7 @@ impl<const W: usize> Bitmap<W> {
     }
 
     /// Count number of set bits.
+    #[allow(dead_code)]
     pub fn count_ones(&self) -> u32 {
         let mut count = 0u32;
         for i in 0..W {
@@ -192,6 +197,7 @@ impl<const W: usize> Bitmap<W> {
     /// Uses word-level trailing_zeros on complement for fast scanning.
     /// Returns None if fewer than k cleared bits exist in [1, max_bit].
     #[inline]
+    #[allow(dead_code)]
     pub fn sum_smallest_unset(&self, k: usize, max_bit: usize) -> Option<u32> {
         if k == 0 {
             return Some(0);
@@ -320,6 +326,7 @@ impl<const W: usize> Bitmap<W> {
     }
 
     #[inline(always)]
+    #[allow(dead_code)]
     pub fn word(&self, i: usize) -> u64 {
         self.words[i]
     }
@@ -333,6 +340,7 @@ impl<const W: usize> Bitmap<W> {
     /// callers can cheaply test whether a whole 64-bit word is empty before
     /// iterating individual bits.
     #[inline(always)]
+    #[allow(dead_code)]
     pub fn word_is_empty(&self, word_idx: usize) -> bool {
         if word_idx < W {
             self.words[word_idx] == 0
@@ -346,6 +354,7 @@ impl<const W: usize> Bitmap<W> {
     /// ranges in cache-friendly chunks: instead of counting bits across the
     /// full bitmap, count only within a segment to support density estimation
     /// and early termination in segmented algorithms.
+    #[allow(dead_code)]
     pub fn count_ones_in_range(&self, start_word: usize, end_word: usize) -> u32 {
         let end = end_word.min(W);
         if start_word >= end {

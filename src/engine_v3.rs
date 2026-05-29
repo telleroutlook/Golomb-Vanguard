@@ -1,9 +1,11 @@
 /// Phase 3: Branch & bound engine with symmetry breaking and dual lower bounds.
+///
 /// Adds:
 ///   - Symmetry breaking: g_first < g_last (halves search space)
-///   - Static lower bound: P + OGR_MIN[rem+1] >= best → prune
+///   - Static lower bound: P + OGR_MIN[rem+1] >= best -> prune
 ///   - Dynamic lower bound (Phase 5 Lock ②): sum of smallest unused distances
 ///   - Incremental available-distance cache (Lock ② advanced)
+///
 /// Both bounds are combined via max().
 use crate::avail::AvailDistances;
 use crate::bitmap::Bitmap;
@@ -50,16 +52,19 @@ pub fn find_optimal_dispatched(n: usize, start_bound: u32) -> Option<(u32, Vec<u
 }
 
 /// Search for any Golomb ruler with `n` marks of length <= `max_len`.
+#[allow(dead_code)]
 pub fn find<const W: usize>(n: usize, max_len: u32) -> Option<Vec<u32>> {
     find_optimal::<W>(n, max_len).map(|(_, m)| m)
 }
 
+#[allow(dead_code)]
 pub fn find_dispatched(n: usize, max_len: u32) -> Option<Vec<u32>> {
     find_optimal_dispatched(n, max_len).map(|(_, m)| m)
 }
 
 /// Prove no Golomb ruler with `n` marks of length <= `max_len` exists.
 /// Returns true if proven impossible (exhaustive search found nothing).
+#[allow(dead_code)]
 pub fn prove_impossible<const W: usize>(n: usize, max_len: u32) -> bool {
     if n <= 1 {
         return false;
@@ -76,6 +81,7 @@ pub fn prove_impossible<const W: usize>(n: usize, max_len: u32) -> bool {
     !dfs_exists(state, n, max_len)
 }
 
+#[allow(dead_code)]
 pub fn prove_impossible_dispatched(n: usize, max_len: u32) -> bool {
     dispatch_bool!(n, max_len, prove_impossible)
 }
@@ -133,7 +139,7 @@ fn dfs_search<const W: usize>(
     let mut newbits = Bitmap::<W>::ZERO;
 
     for gap in 1..=gap_ceiling {
-        if state.depth == n - 1 && gap as u32 <= state.first_gap {
+        if state.depth == n - 1 && gap <= state.first_gap {
             continue;
         }
 
@@ -144,7 +150,7 @@ fn dfs_search<const W: usize>(
 
         // Incremental dynamic lower bound
         if let Some(ref base) = base_avail {
-            let new_pos = state.pos + gap as u32;
+            let new_pos = state.pos + gap;
             let filtered = AvailDistances::without_bitmap::<W>(base, &newbits);
             if let Some(dynamic_sum) = filtered.sum_k(rem - 1) {
                 let dynamic_bound = new_pos + dynamic_sum;
@@ -163,17 +169,18 @@ fn dfs_search<const W: usize>(
         new_state.dist |= newbits;
         new_state.ruler = newbits;
         new_state.ruler.set_bit(0);
-        new_state.pos += gap as u32;
+        new_state.pos += gap;
         new_state.depth += 1;
         if state.depth == 1 {
-            new_state.first_gap = gap as u32;
+            new_state.first_gap = gap;
         }
 
-        gaps[state.depth - 1] = gap as u32;
+        gaps[state.depth - 1] = gap;
         dfs_search(new_state, n, best, gaps, best_marks);
     }
 }
 
+#[allow(dead_code)]
 fn dfs_exists<const W: usize>(state: State<W>, n: usize, max_len: u32) -> bool {
     if state.depth == n {
         return true;
@@ -189,7 +196,7 @@ fn dfs_exists<const W: usize>(state: State<W>, n: usize, max_len: u32) -> bool {
     let mut newbits = Bitmap::<W>::ZERO;
 
     for gap in 1..=gap_ceiling {
-        if state.depth == n - 1 && gap as u32 <= state.first_gap {
+        if state.depth == n - 1 && gap <= state.first_gap {
             continue;
         }
 
@@ -202,10 +209,10 @@ fn dfs_exists<const W: usize>(state: State<W>, n: usize, max_len: u32) -> bool {
         new_state.dist |= newbits;
         new_state.ruler = newbits;
         new_state.ruler.set_bit(0);
-        new_state.pos += gap as u32;
+        new_state.pos += gap;
         new_state.depth += 1;
         if state.depth == 1 {
-            new_state.first_gap = gap as u32;
+            new_state.first_gap = gap;
         }
 
         if dfs_exists(new_state, n, max_len) {
@@ -285,7 +292,6 @@ mod tests {
     fn test_v3_ogr_up_to_18() {
         for n in 14..=18 {
             let expected = optimal_length(n).unwrap();
-            let words = crate::known::required_words(expected);
             let (len, marks) = find_optimal_dispatched(n, expected + 5).unwrap();
             assert_eq!(
                 len, expected,

@@ -1,6 +1,6 @@
 /// Phase 1: Naive DFS backtracking engine.
 /// Pure correctness, no performance tricks. Serves as the golden reference.
-
+///
 /// Find a Golomb ruler with `n` marks of length <= `max_len`.
 /// Returns mark positions if found.
 pub fn find(n: usize, max_len: u32) -> Option<Vec<u32>> {
@@ -17,6 +17,7 @@ pub fn find(n: usize, max_len: u32) -> Option<Vec<u32>> {
 
 /// Exhaustively check whether a Golomb ruler with `n` marks of length <= `max_len` exists.
 /// Returns true if it does (NOT proven impossible).
+#[allow(dead_code)]
 pub fn exists(n: usize, max_len: u32) -> bool {
     if n <= 1 || max_len == 0 {
         return n <= 1;
@@ -26,12 +27,7 @@ pub fn exists(n: usize, max_len: u32) -> bool {
     dfs_exists(n, max_len, &mut marks, &mut used)
 }
 
-fn dfs_find(
-    n: usize,
-    max_len: u32,
-    marks: &mut Vec<u32>,
-    used: &mut Vec<bool>,
-) -> Option<Vec<u32>> {
+fn dfs_find(n: usize, max_len: u32, marks: &mut Vec<u32>, used: &mut [bool]) -> Option<Vec<u32>> {
     if marks.len() == n {
         return Some(marks.clone());
     }
@@ -48,7 +44,8 @@ fn dfs_find(
     None
 }
 
-fn dfs_exists(n: usize, max_len: u32, marks: &mut Vec<u32>, used: &mut Vec<bool>) -> bool {
+#[allow(dead_code)]
+fn dfs_exists(n: usize, max_len: u32, marks: &mut Vec<u32>, used: &mut [bool]) -> bool {
     if marks.len() == n {
         return true;
     }
@@ -66,7 +63,7 @@ fn dfs_exists(n: usize, max_len: u32, marks: &mut Vec<u32>, used: &mut Vec<bool>
 }
 
 /// Try to place mark at position `x`. Returns true if all new distances are unique.
-fn try_place(x: u32, marks: &mut Vec<u32>, used: &mut Vec<bool>) -> bool {
+fn try_place(x: u32, marks: &mut Vec<u32>, used: &mut [bool]) -> bool {
     let mut dists = [0usize; 32];
     let mut count = 0;
     for &m in marks.iter() {
@@ -77,15 +74,15 @@ fn try_place(x: u32, marks: &mut Vec<u32>, used: &mut Vec<bool>) -> bool {
         dists[count] = d;
         count += 1;
     }
-    for i in 0..count {
-        used[dists[i]] = true;
+    for &d in &dists[..count] {
+        used[d] = true;
     }
     marks.push(x);
     true
 }
 
 /// Remove the last mark and unmark its distances.
-fn unplace(x: u32, marks: &mut Vec<u32>, used: &mut Vec<bool>) {
+fn unplace(x: u32, marks: &mut Vec<u32>, used: &mut [bool]) {
     marks.pop();
     for &m in marks.iter() {
         let d = (x - m) as usize;
@@ -94,6 +91,7 @@ fn unplace(x: u32, marks: &mut Vec<u32>, used: &mut Vec<bool>) {
 }
 
 /// Verify that a set of marks forms a valid Golomb ruler (all pairwise distances unique).
+#[cfg(test)]
 pub fn verify_golomb(marks: &[u32]) {
     let n = marks.len();
     let mut seen = std::collections::HashSet::new();

@@ -7,7 +7,7 @@
 /// Complexity: O(MAX_AVAIL * |newbits|) per gap vs O(max_bit) with full scan.
 /// For OGR-20: ~20 * 10 ≈ 200 ops vs ~283 ops, but constant factor is much better
 /// since we avoid bitmap allocation and word iteration.
-
+///
 /// Maximum number of available distances to track.
 /// For OGR-28 (28 marks), we need at most 27 distances for the bound.
 pub const MAX_AVAIL: usize = 30;
@@ -75,6 +75,7 @@ impl AvailDistances {
 
     /// Number of available distances tracked.
     #[inline(always)]
+    #[allow(dead_code)]
     pub fn count(&self) -> usize {
         self.count
     }

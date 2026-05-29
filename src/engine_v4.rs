@@ -16,6 +16,8 @@ use rayon::prelude::*;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
+type BestMarks = Arc<std::sync::Mutex<Option<(u32, Vec<u32>)>>>;
+
 /// Cache-line aligned atomic best to avoid false sharing.
 #[repr(align(64))]
 struct AlignedAtomicU32 {
@@ -122,8 +124,7 @@ pub fn find_optimal<const W: usize>(
         .unwrap_or_else(|_| rayon::ThreadPoolBuilder::new().build().unwrap());
 
     let global_best = Arc::new(AlignedAtomicU32::new(start_bound + 1));
-    let best_marks: Arc<std::sync::Mutex<Option<(u32, Vec<u32>)>>> =
-        Arc::new(std::sync::Mutex::new(None));
+    let best_marks: BestMarks = Arc::new(std::sync::Mutex::new(None));
 
     #[cfg(feature = "stats")]
     let agg_nodes: Arc<std::sync::atomic::AtomicU64> =
@@ -263,7 +264,7 @@ fn enumerate_stubs<const W: usize>(
     let mut newbits = Bitmap::<W>::ZERO;
 
     for gap in 1..=gap_ceiling {
-        if state.depth == n - 1 && gap as u32 <= state.first_gap {
+        if state.depth == n - 1 && gap <= state.first_gap {
             continue;
         }
 
@@ -273,7 +274,7 @@ fn enumerate_stubs<const W: usize>(
         }
 
         if rem + 1 < OGR_OPTIMAL.len() {
-            let new_pos = state.pos + gap as u32;
+            let new_pos = state.pos + gap;
             let bound = new_pos + OGR_OPTIMAL[rem];
             if bound > max_len {
                 continue;
@@ -283,13 +284,12 @@ fn enumerate_stubs<const W: usize>(
         // Per-gap symmetry-aware static bound
         if rem >= 2 && (rem - 1) < OGR_OPTIMAL.len() {
             let child_first_gap = if state.depth == 1 {
-                gap as u32
+                gap
             } else {
                 state.first_gap
             };
             if child_first_gap > 0 {
-                let sym_bound =
-                    (state.pos + gap as u32) + OGR_OPTIMAL[rem - 1] + child_first_gap + 1;
+                let sym_bound = (state.pos + gap) + OGR_OPTIMAL[rem - 1] + child_first_gap + 1;
                 if sym_bound > max_len {
                     continue;
                 }
@@ -300,13 +300,13 @@ fn enumerate_stubs<const W: usize>(
         new_state.dist |= newbits;
         new_state.ruler = newbits;
         new_state.ruler.set_bit(0);
-        new_state.pos += gap as u32;
+        new_state.pos += gap;
         new_state.depth += 1;
         if state.depth == 1 {
-            new_state.first_gap = gap as u32;
+            new_state.first_gap = gap;
         }
 
-        gaps[gap_idx] = gap as u32;
+        gaps[gap_idx] = gap;
         enumerate_stubs(
             new_state,
             n,
@@ -323,13 +323,14 @@ fn enumerate_stubs<const W: usize>(
 const SYNC_INTERVAL: u32 = 50_000;
 const PARALLEL_GRAIN_DEPTH: usize = 7;
 
+#[allow(clippy::type_complexity)]
 fn dfs_parallel<const W: usize>(
     state: State<W>,
     n: usize,
     global_best: &AlignedAtomicU32,
     mut local_best: u32,
     gaps: &mut [u32],
-    best_marks: &Arc<std::sync::Mutex<Option<(u32, Vec<u32>)>>>,
+    best_marks: &BestMarks,
     mut iter_count: u32,
 ) {
     stat_inc_nodes!();
@@ -428,13 +429,14 @@ fn dfs_parallel<const W: usize>(
 
 const MAX_INLINE_GAPS: usize = 128;
 
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
 fn dfs_parallel_recursive<const W: usize>(
     state: State<W>,
     n: usize,
     global_best: &AlignedAtomicU32,
     local_best: u32,
     gaps: &mut [u32],
-    best_marks: &Arc<std::sync::Mutex<Option<(u32, Vec<u32>)>>>,
+    best_marks: &BestMarks,
     iter_count: u32,
     gap_ceiling: u32,
 ) {
@@ -606,13 +608,14 @@ impl SmallGapBuf {
     }
 }
 
+#[allow(clippy::type_complexity)]
 fn dfs_serial<const W: usize>(
     state: State<W>,
     n: usize,
     local_best: &mut u32,
     global_best: &AlignedAtomicU32,
     gaps: &mut [u32],
-    best_marks: &Arc<std::sync::Mutex<Option<(u32, Vec<u32>)>>>,
+    best_marks: &BestMarks,
     mut iter_count: u32,
 ) {
     stat_inc_nodes!();
@@ -706,10 +709,8 @@ fn dfs_serial<const W: usize>(
             }
 
             // Per-gap static bound (local_best may have changed)
-            if rem < OGR_OPTIMAL.len() {
-                if state.pos + gap + OGR_OPTIMAL[rem] >= *local_best {
-                    continue;
-                }
+            if rem < OGR_OPTIMAL.len() && state.pos + gap + OGR_OPTIMAL[rem] >= *local_best {
+                continue;
             }
 
             // Per-gap symmetry-aware static bound

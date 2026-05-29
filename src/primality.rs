@@ -3,7 +3,7 @@
 /// Combines a strong Miller-Rabin test (base 2) with a strong Lucas-Selfridge test.
 /// No known composites pass both tests (verified for all n < 2^64).
 /// Trial division by small primes is used as a fast-reject first step.
-
+///
 /// Small primes for trial division.
 const SMALL_PRIMES: &[u64] = &[
     2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71, 73, 79, 83, 89, 97,
@@ -18,7 +18,7 @@ pub fn is_prime_bpsw(n: u64) -> bool {
         if n == p {
             return true;
         }
-        if n % p == 0 {
+        if n.is_multiple_of(p) {
             return false;
         }
     }
@@ -33,11 +33,11 @@ pub fn is_prime_bpsw(n: u64) -> bool {
 /// Writes n - 1 = d * 2^s with d odd, then checks whether
 /// a^d ≡ 1 (mod n) or a^(d*2^r) ≡ -1 (mod n) for some 0 <= r < s.
 pub fn miller_rabin_strong(n: u64, base: u64) -> bool {
-    debug_assert!(n > 2 && n % 2 != 0);
+    debug_assert!(n > 2 && !n.is_multiple_of(2));
 
     let mut d = n - 1;
     let mut s = 0u32;
-    while d % 2 == 0 {
+    while d.is_multiple_of(2) {
         d /= 2;
         s += 1;
     }
@@ -67,7 +67,7 @@ pub fn miller_rabin_strong(n: u64, base: u64) -> bool {
 ///   U_d ≡ 0 (mod n), or
 ///   V_{d * 2^r} ≡ 0 (mod n) for some 0 <= r < s.
 pub fn strong_lucas_test(n: u64) -> bool {
-    debug_assert!(n > 2 && n % 2 != 0);
+    debug_assert!(n > 2 && !n.is_multiple_of(2));
 
     // Selfridge parameter selection: find D with (D/n) = -1
     let mut d_abs = 5i64;
@@ -103,7 +103,7 @@ pub fn strong_lucas_test(n: u64) -> bool {
     // Write n + 1 = d * 2^s with d odd
     let mut d = n + 1;
     let mut s = 0u32;
-    while d % 2 == 0 {
+    while d.is_multiple_of(2) {
         d /= 2;
         s += 1;
     }
@@ -180,7 +180,7 @@ fn lucas_chain(k: u64, p: u64, q: u64, n: u64) -> (u64, u64) {
             // where D = P^2 - 4Q
             //
             // Division by 2 mod n: multiply by (n+1)/2 (since n is odd, (n+1)/2 is the inverse of 2).
-            let half = (n + 1) / 2;
+            let half = n.div_ceil(2);
             let d_val = (mod_mul(p, p, n) + n - mod_mul(4, q, n)) % n;
 
             u = mod_mul((mod_mul(p, u2, n) + v2) % n, half, n);
@@ -198,7 +198,7 @@ fn jacobi(mut a: i64, n: u64) -> i64 {
     let mut n = n as i64;
     let mut result = 1i64;
 
-    a = a % n;
+    a %= n;
     if a < 0 {
         a += n;
     }
@@ -215,7 +215,7 @@ fn jacobi(mut a: i64, n: u64) -> i64 {
         if a % 4 == 3 && n % 4 == 3 {
             result = -result;
         }
-        a = a % n;
+        a %= n;
     }
 
     if n == 1 {
