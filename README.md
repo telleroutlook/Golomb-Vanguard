@@ -7,7 +7,9 @@
 [![Rust](https://img.shields.io/badge/Rust-2021-orange.svg)](https://www.rust-lang.org/)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
-Find Optimal Golomb Rulers (OGRs) — from textbook cases to the research frontier (`n >= 29`) — with progressively optimized search engines and multi-threaded work-stealing.
+Find Optimal Golomb Rulers (OGRs) with progressively optimized search engines — from naive DFS to parallel work-stealing.
+
+> **Scope:** This is a single-machine educational engine. It can find OGR-n for n ≤ ~13 in seconds and verify known OGRs up to n=28. It is **not** a contender for n ≥ 29, where OGR search requires distributed computing (the OGR-28 record was set by distributed.net over millions of CPU-years).
 
 </div>
 
@@ -25,7 +27,7 @@ OGR-4: 0  1  4  6    (length 6)
           4  2
 ```
 
-Optimal lengths for `n = 2..28` are known (OEIS A003022). For `n >= 29`, they remain **open research problems**.
+Optimal lengths for `n = 2..28` are known (OEIS A003022), mostly found by the [distributed.net OGR-NG project](https://www.distributed.net/OGR). For `n >= 29`, they remain **open research problems** requiring massive distributed search.
 
 ---
 
