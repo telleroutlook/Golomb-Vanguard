@@ -1,7 +1,6 @@
 /// Constructive Golomb ruler generation for seeding find-mode upper bound.
 /// Uses a greedy algorithm: place each mark at the smallest position that
 /// maintains the Golomb property (all pairwise distances unique).
-
 use std::collections::HashSet;
 
 use crate::primality::is_prime_bpsw;
@@ -166,15 +165,23 @@ mod tests {
 
     #[test]
     fn test_construct_bounds() {
-        let cases = [
-            (10, 55, 200),
-            (14, 127, 400),
-            (20, 283, 1000),
-        ];
+        let cases = [(10, 55, 200), (14, 127, 400), (20, 283, 1000)];
         for (n, optimal, max_expected) in cases {
             let len = construct_bound(n);
-            assert!(len > optimal, "n={}: len={} should exceed optimal {}", n, len, optimal);
-            assert!(len < max_expected, "n={}: len={} should be < {}", n, len, max_expected);
+            assert!(
+                len > optimal,
+                "n={}: len={} should exceed optimal {}",
+                n,
+                len,
+                optimal
+            );
+            assert!(
+                len < max_expected,
+                "n={}: len={} should be < {}",
+                n,
+                len,
+                max_expected
+            );
             eprintln!("OGR-{}: bound = {} (optimal = {})", n, len, optimal);
         }
     }

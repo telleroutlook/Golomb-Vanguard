@@ -1,7 +1,6 @@
 /// Phase 2: Dual-bitmap shift-and-AND engine.
 /// Uses `dist` (distance bitmap) and `ruler` (reverse ruler bitmap)
 /// for register-level bit operations instead of per-distance subtraction loops.
-
 use crate::bitmap::Bitmap;
 
 /// Search state for the bitmask engine.
@@ -194,8 +193,13 @@ mod tests {
         for n in 2..=13 {
             let expected = optimal_length(n).unwrap();
             let result = find::<2>(n, expected).unwrap();
-            assert_eq!(*result.last().unwrap(), expected,
-                "V2 OGR-{} should be {}", n, expected);
+            assert_eq!(
+                *result.last().unwrap(),
+                expected,
+                "V2 OGR-{} should be {}",
+                n,
+                expected
+            );
             crate::naive::verify_golomb(&result);
         }
     }
@@ -207,9 +211,11 @@ mod tests {
             for max_len in 1..=optimal_length(n).unwrap() + 2 {
                 let naive_result = crate::naive::find(n, max_len).is_some();
                 let v2_result = find::<2>(n, max_len).is_some();
-                assert_eq!(naive_result, v2_result,
+                assert_eq!(
+                    naive_result, v2_result,
                     "Disagreement at n={}, max_len={}: naive={}, v2={}",
-                    n, max_len, naive_result, v2_result);
+                    n, max_len, naive_result, v2_result
+                );
             }
         }
     }

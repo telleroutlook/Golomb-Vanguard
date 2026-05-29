@@ -48,10 +48,7 @@ impl AvailDistances {
 
     /// Build from base avail, removing the set bits in `newbits` bitmap.
     /// `newbits_count` is the number of set bits in newbits (avoids recomputation).
-    pub fn without_bitmap<const W: usize>(
-        base: &Self,
-        newbits: &crate::bitmap::Bitmap<W>,
-    ) -> Self {
+    pub fn without_bitmap<const W: usize>(base: &Self, newbits: &crate::bitmap::Bitmap<W>) -> Self {
         let mut result = *base;
         // Remove each distance that appears in newbits
         for bit in newbits.iter_set_bits() {

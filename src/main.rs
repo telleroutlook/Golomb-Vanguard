@@ -1,18 +1,21 @@
-mod known;
-mod naive;
-mod bitmap;
 mod avail;
+mod bitmap;
 mod construct;
-mod primality;
 mod engine_v2;
 mod engine_v3;
 mod engine_v4;
+mod known;
+mod naive;
+mod primality;
 
 use clap::Parser;
 use std::time::Instant;
 
 #[derive(Parser)]
-#[command(name = "golomb-vanguard", about = "Optimal Golomb Ruler ultra-fast search engine")]
+#[command(
+    name = "golomb-vanguard",
+    about = "Optimal Golomb Ruler ultra-fast search engine"
+)]
 struct Cli {
     /// Number of marks
     #[arg(short, long)]
@@ -47,16 +50,23 @@ fn main() {
     let known = known::optimal_length(n);
     let max_len = cli.max_len.or(known).unwrap_or_else(|| {
         let bound = construct::construct_bound(n);
-        eprintln!("No known optimal for OGR-{}, using constructive bound: {}", n, bound);
+        eprintln!(
+            "No known optimal for OGR-{}, using constructive bound: {}",
+            n, bound
+        );
         bound
     });
 
     let threads = cli.threads.unwrap_or_else(|| {
-        std::thread::available_parallelism().map(|p| p.get()).unwrap_or(4)
+        std::thread::available_parallelism()
+            .map(|p| p.get())
+            .unwrap_or(4)
     });
 
-    eprintln!("OGR-{} | engine={} | mode={} | max_len={} | threads={}",
-              n, cli.engine, cli.mode, max_len, threads);
+    eprintln!(
+        "OGR-{} | engine={} | mode={} | max_len={} | threads={}",
+        n, cli.engine, cli.mode, max_len, threads
+    );
 
     match cli.mode.as_str() {
         "find" => run_find(n, max_len, &cli.engine, threads),
@@ -110,7 +120,10 @@ fn run_find(n: usize, max_len: u32, engine: &str, threads: usize) {
             eprintln!("Time: {:.3}s", elapsed.as_secs_f64());
         }
         None => {
-            println!("No Golomb ruler with {} marks of length <= {} exists.", n, max_len);
+            println!(
+                "No Golomb ruler with {} marks of length <= {} exists.",
+                n, max_len
+            );
             eprintln!("Time: {:.3}s", elapsed.as_secs_f64());
         }
     }
@@ -120,7 +133,10 @@ fn run_prove(n: usize, max_len: u32, engine: &str, threads: usize) {
     // find_optimal exhaustively searches all rulers ≤ max_len.
     // If the shortest found equals max_len, optimality is proven
     // (no shorter ruler exists — the search was exhaustive).
-    eprintln!("Proving OGR-{} optimal: exhaustive search at length {}...", n, max_len);
+    eprintln!(
+        "Proving OGR-{} optimal: exhaustive search at length {}...",
+        n, max_len
+    );
     let start = Instant::now();
 
     let found = match engine {
@@ -139,10 +155,16 @@ fn run_prove(n: usize, max_len: u32, engine: &str, threads: usize) {
     match found {
         Some((len, marks)) => {
             if len == max_len {
-                println!("PROVEN: OGR-{} = {} (optimal, exhaustive search found no shorter ruler)", n, max_len);
+                println!(
+                    "PROVEN: OGR-{} = {} (optimal, exhaustive search found no shorter ruler)",
+                    n, max_len
+                );
                 println!("Marks: {:?}", marks);
             } else {
-                println!("NOT PROVEN: found shorter ruler (length {} < {})", len, max_len);
+                println!(
+                    "NOT PROVEN: found shorter ruler (length {} < {})",
+                    len, max_len
+                );
                 println!("Marks: {:?}", marks);
             }
         }

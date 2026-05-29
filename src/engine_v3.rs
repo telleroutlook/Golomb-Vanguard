@@ -5,7 +5,6 @@
 ///   - Dynamic lower bound (Phase 5 Lock ②): sum of smallest unused distances
 ///   - Incremental available-distance cache (Lock ② advanced)
 /// Both bounds are combined via max().
-
 use crate::avail::AvailDistances;
 use crate::bitmap::Bitmap;
 use crate::known::OGR_OPTIMAL;
@@ -122,7 +121,11 @@ fn dfs_search<const W: usize>(
 
     // Precompute available distances for dynamic bound (incremental Lock ②)
     let base_avail = if rem >= 2 {
-        Some(AvailDistances::from_bitmap(&state.dist, rem - 1, *best as usize))
+        Some(AvailDistances::from_bitmap(
+            &state.dist,
+            rem - 1,
+            *best as usize,
+        ))
     } else {
         None
     };
@@ -268,7 +271,11 @@ mod tests {
         for n in 2..=13 {
             let expected = optimal_length(n).unwrap();
             let (len, marks) = find_optimal::<2>(n, expected + 5).unwrap();
-            assert_eq!(len, expected, "V3 OGR-{} should be {}, got {}", n, expected, len);
+            assert_eq!(
+                len, expected,
+                "V3 OGR-{} should be {}, got {}",
+                n, expected, len
+            );
             crate::naive::verify_golomb(&marks);
         }
     }
@@ -280,7 +287,11 @@ mod tests {
             let expected = optimal_length(n).unwrap();
             let words = crate::known::required_words(expected);
             let (len, marks) = find_optimal_dispatched(n, expected + 5).unwrap();
-            assert_eq!(len, expected, "V3 OGR-{} should be {}, got {}", n, expected, len);
+            assert_eq!(
+                len, expected,
+                "V3 OGR-{} should be {}, got {}",
+                n, expected, len
+            );
             crate::naive::verify_golomb(&marks);
         }
     }
@@ -291,8 +302,12 @@ mod tests {
         for n in 2..=10 {
             let naive_result = crate::naive::find(n, optimal_length(n).unwrap());
             let v3_result = find::<2>(n, optimal_length(n).unwrap());
-            assert_eq!(naive_result.is_some(), v3_result.is_some(),
-                "V3 symmetry breaking broke OGR-{}", n);
+            assert_eq!(
+                naive_result.is_some(),
+                v3_result.is_some(),
+                "V3 symmetry breaking broke OGR-{}",
+                n
+            );
         }
     }
 

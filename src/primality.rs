@@ -6,8 +6,7 @@
 
 /// Small primes for trial division.
 const SMALL_PRIMES: &[u64] = &[
-    2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71, 73, 79, 83, 89,
-    97,
+    2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71, 73, 79, 83, 89, 97,
 ];
 
 /// Returns true if n is probably prime using the Baillie-PSW test.
@@ -219,7 +218,11 @@ fn jacobi(mut a: i64, n: u64) -> i64 {
         a = a % n;
     }
 
-    if n == 1 { result } else { 0 }
+    if n == 1 {
+        result
+    } else {
+        0
+    }
 }
 
 /// Modular exponentiation: base^exp mod m.
@@ -298,8 +301,7 @@ mod tests {
     fn test_more_primes() {
         // Verify a range of known primes
         let primes = [
-            101, 103, 107, 109, 113, 127, 131, 137, 139, 149,
-            997, 1009, 1013, 1019,
+            101, 103, 107, 109, 113, 127, 131, 137, 139, 149, 997, 1009, 1013, 1019,
             65537, // Fermat prime F4
         ];
         for &p in &primes {
@@ -310,8 +312,7 @@ mod tests {
     #[test]
     fn test_more_composites() {
         let composites = [
-            49, 77, 91, 121, 143, 169, 221, 323,
-            999, 1001,
+            49, 77, 91, 121, 143, 169, 221, 323, 999, 1001,
             3215031751, // strong pseudoprime to bases 2, 3, 5, 7
         ];
         for &c in &composites {

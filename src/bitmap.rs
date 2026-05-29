@@ -2,7 +2,6 @@
 /// Core data structure for Phases 2-5.
 /// Includes Phase 5 Lock ①: branchless cross-word shift (shl_into)
 /// with corrected edge cases for bit_off=0 and g>=64.
-
 use std::ops::{BitAnd, BitOr, BitOrAssign, Not};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -352,7 +351,10 @@ impl<const W: usize> Bitmap<W> {
         if start_word >= end {
             return 0;
         }
-        self.words[start_word..end].iter().map(|w| w.count_ones()).sum()
+        self.words[start_word..end]
+            .iter()
+            .map(|w| w.count_ones())
+            .sum()
     }
 }
 
@@ -481,7 +483,7 @@ mod tests {
     fn test_shl_cross_word() {
         let mut bm: Bitmap<2> = Bitmap::ZERO;
         bm.set_bit(62); // bit 62 in word 0
-        // shift by 3: bit 62 -> bit 65 (word 1, offset 1)
+                        // shift by 3: bit 62 -> bit 65 (word 1, offset 1)
         let shifted = bm.shl(3);
         assert!(!shifted.get_bit(62));
         assert!(shifted.get_bit(65));
@@ -603,8 +605,8 @@ mod tests {
         bm.set_bit(130);
 
         let shifted = bm.shr(64);
-        assert!(shifted.get_bit(0));   // was 64
-        assert!(shifted.get_bit(66));  // was 130
+        assert!(shifted.get_bit(0)); // was 64
+        assert!(shifted.get_bit(66)); // was 130
         assert!(!shifted.get_bit(5));
     }
 

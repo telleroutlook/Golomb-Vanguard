@@ -48,12 +48,7 @@ fn dfs_find(
     None
 }
 
-fn dfs_exists(
-    n: usize,
-    max_len: u32,
-    marks: &mut Vec<u32>,
-    used: &mut Vec<bool>,
-) -> bool {
+fn dfs_exists(n: usize, max_len: u32, marks: &mut Vec<u32>, used: &mut Vec<bool>) -> bool {
     if marks.len() == n {
         return true;
     }
@@ -120,8 +115,13 @@ mod tests {
         for n in 2..=9 {
             let expected = optimal_length(n).unwrap();
             let result = find(n, expected).unwrap();
-            assert_eq!(*result.last().unwrap(), expected,
-                "OGR-{} should have length {}", n, expected);
+            assert_eq!(
+                *result.last().unwrap(),
+                expected,
+                "OGR-{} should have length {}",
+                n,
+                expected
+            );
             verify_golomb(&result);
         }
     }
