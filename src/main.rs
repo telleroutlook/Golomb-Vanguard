@@ -3,6 +3,7 @@ mod naive;
 mod bitmap;
 mod avail;
 mod construct;
+mod primality;
 mod engine_v2;
 mod engine_v3;
 mod engine_v4;
