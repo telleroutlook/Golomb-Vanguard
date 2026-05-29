@@ -324,6 +324,36 @@ impl<const W: usize> Bitmap<W> {
     pub fn word(&self, i: usize) -> u64 {
         self.words[i]
     }
+
+    /// Check if any bit is set in a specific word (cache line segment).
+    /// Useful for early-exit in segmented pruning: skip entire cache lines
+    /// that have no set bits, avoiding per-bit scanning.
+    ///
+    /// Borrows from BlazingGoldbach's segmented sieve strategy of processing
+    /// ranges in cache-friendly chunks — here applied to bitmap scanning so
+    /// callers can cheaply test whether a whole 64-bit word is empty before
+    /// iterating individual bits.
+    #[inline(always)]
+    pub fn word_is_empty(&self, word_idx: usize) -> bool {
+        if word_idx < W {
+            self.words[word_idx] == 0
+        } else {
+            true
+        }
+    }
+
+    /// Count set bits in a range of words [start_word, end_word).
+    /// Borrowed from BlazingGoldbach's segmented sieve strategy of processing
+    /// ranges in cache-friendly chunks: instead of counting bits across the
+    /// full bitmap, count only within a segment to support density estimation
+    /// and early termination in segmented algorithms.
+    pub fn count_ones_in_range(&self, start_word: usize, end_word: usize) -> u32 {
+        let end = end_word.min(W);
+        if start_word >= end {
+            return 0;
+        }
+        self.words[start_word..end].iter().map(|w| w.count_ones()).sum()
+    }
 }
 
 pub struct BitmapIter<'a, const W: usize> {
